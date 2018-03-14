@@ -4,6 +4,8 @@
 SCALEIO_DEBUG="1"
 
 LOGFILE="/var/log/scaleio-flexvol.log"
+KUBECONFIG="$(ls -1 /etc/origin/node/system:node:*.kubeconfig)"
+TOKEN="$(/opt/emc/scaleio/flexvol/get-token.sh)"
 
 # stderr
 err() {
@@ -66,7 +68,7 @@ getvolumename() {
 		err "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
 		exit 1
 	fi
-	log "{\"status\": \"Success\", \"volumeName\":\"${VOLUMEID}\"}"
+	log "{\"status\": \"Success\", \"volumeName\": \"${VOLUMEID}\"}"
 	exit 0
 }
 
@@ -80,6 +82,11 @@ attach() {
 		exit 1
 	fi
 
+	VOLUME_ATTACHED=$(oc --config=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attached}}')
+	VOLUME_ATTACHED_NODE=$(oc --config=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attachedNode}}')
+	debug "attached:" "${VOLUME_ATTACHED}"
+	debug "attachedNode:" "${VOLUME_ATTACHED_NODE}"
+
 	if [ -z "${VOLUME_ATTACHED}" ]; then
 		VOLUME_ATTACHED="false"
 	fi
@@ -92,6 +99,11 @@ attach() {
 		exit 1
 	fi
 
+	SET_LABEL_ATTACHED=$(oc --config=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attached=true)
+	SET_LABEL_ATTACHED_NODE=$(oc --config=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attachedNode=${NODE_NAME})
+	debug "set_label_attached:" "${SET_LABEL_ATTACHED}"
+	debug "set_label_attachedNode:" "${SET_LABEL_ATTACHED_NODE}"
+
 	log "{\"status\": \"Success\", \"device\":\"${VOLUMEID}\"}"
 	exit 0
 }
@@ -99,6 +111,11 @@ attach() {
 detach() {
 	VOLUMEID=$1
 	NODE_NAME=$2
+
+	SET_LABEL_ATTACHED=$(oc --config=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attached=false)
+	SET_LABEL_ATTACHED_NODE=$(oc --config=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attachedNode-)
+	debug "set_label_attached:" "${SET_LABEL_ATTACHED}"
+	debug "set_label_attachedNode:" "${SET_LABEL_ATTACHED_NODE}"
 
 	success
 }
@@ -161,17 +178,18 @@ isattached() {
 	NODE_NAME=$2
 	volidfromjson
 
-	DEV="/dev/disk/by-id/$(ls -1 /dev/disk/by-id | grep "\-${VOLUMEID}$")"
+	VOLUME_ATTACHED=$(oc --config=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attached}}')
+	VOLUME_ATTACHED_NODE=$(oc --config=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attachedNode}}')
+	debug "attached:" "${VOLUME_ATTACHED}"
+	debug "attachedNode:" "${VOLUME_ATTACHED_NODE}"
 
-	if [ -z "$DEV" ]; then
-		if [ "$SCALEIO_DEBUG" = "1" ]; then
-			printf "%s - isattached - %s - volume not found or mapped: %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "${VOLUMEID}" >> ${LOGFILE}
+	if [ "${VOLUME_ATTACHED}" = "true" ]; then
+		if [ "${VOLUME_ATTACHED_NODE}" = "${NODE_NAME}" ]; then
+			log "{\"status\": \"Success\", \"attached\":true}"
+			exit 0
 		fi
-		err "{\"status\": \"Failure\", \"message\": \"Volume not found/mapped\"}"
-		exit 1
 	fi
-
-	log "{\"status\": \"Success\", \"attached\":True}"
+	log "{\"status\": \"Success\", \"attached\":false}"
 	exit 0
 }
 
@@ -196,7 +214,10 @@ waitforattach() {
 
 op=$1
 
-if [ "$op" = "init" ]; then success; fi
+if [ "$op" = "init" ]; then
+	log "{\"status\":\"Success\",\"capabilities\":{\"attach\":true}}"
+	exit 0
+fi
 if [ "$#" -lt "2" ]; then usage; fi
 
 shift
@@ -219,12 +240,6 @@ case "$op" in
 	unmountdevice)
 		unmountdevice "$@"
 		;;
-	mount)
-		err "{\"status\": \"Not supported\"}"
-		;;
-	unmount)
-		err "{\"status\": \"Not supported\"}"
-		;;
 	isattached)
 		isattached "$@"
 		;;
@@ -232,7 +247,7 @@ case "$op" in
 		getvolumename "$@"
 		;;
 	*)
-		err "{\"status\": \"Failure\", \"message\": \"Unsupported command\"}"
+		err "{\"status\": \"Not supported\"}"
 		exit 1
 esac
 
