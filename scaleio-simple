@@ -1,0 +1,210 @@
+#!/bin/sh
+
+# Uncomment line below to enable logging
+SCALEIO_DEBUG="1"
+
+LOGFILE="/var/log/scaleio-flexvol.log"
+
+# stderr
+err() {
+	debug "failure status" "$*"
+	printf "%b" "$*" 1>&2
+}
+
+# stdout
+log() {
+	debug "success status" "$*"
+	printf "%b" "$*" >&1
+}
+
+# log file
+debug() {
+	if [ "$SCALEIO_DEBUG" = "1" ]; then
+		printf "%s - %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$*" >> ${LOGFILE}
+	fi
+}
+
+success() {
+	log '{"status": "Success"}'
+	exit 0
+}
+
+usage() {
+	err "error: invalid usage\n"
+	err "\t$0 init\n"
+	err "\t$0 attach <json params> <nodename>\n"
+	err "\t$0 detach <mount device> <nodename>\n"
+	err "\t$0 waitforattach <mount device> <json params>\n"
+	err "\t$0 mountdevice <mount dir> <mount device> <json params>\n"
+	err "\t$0 unmountdevice <mount dir>\n"
+	err "\t$0 isattached <json params> <nodename>\n"
+
+	err "\t$0 mount <mount dir> <mount device> <json params>\n"
+	err "\t$0 unmount <mount dir>\n"
+	exit 1
+}
+
+ismounted() {
+	MOUNT=$(findmnt -n "${MNTPATH}" 2>/dev/null | cut -d' ' -f1)
+	if [ "${MOUNT}" = "${MNTPATH}" ]; then echo 1; else echo 0; fi
+}
+
+# Requires $JSON_PARAMS to be set
+# Sets $VOLUMEID
+volidfromjson() {
+	VOLUMEID=$(echo "${JSON_PARAMS}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
+	if [ -z "${VOLUMEID}" ] || [ "${VOLUMEID}" = null ]; then
+		err "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
+		exit 1
+	fi
+}
+
+getvolumename() {
+	JSON_PARAMS=$1
+	VOLUMEID=$(echo "${JSON_PARAMS}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
+	if [ -z "${VOLUMEID}" ] || [ "${VOLUMEID}" = null ]; then
+		err "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
+		exit 1
+	fi
+	log "{\"status\": \"Success\", \"volumeName\": \"${VOLUMEID}\"}"
+	exit 0
+}
+
+attach() {
+	JSON_PARAMS=$1
+	NODE_NAME=$2
+	volidfromjson
+
+	if [ -z "$VOLUMEID" ]; then
+		err '{"status": "Failure", "message": "Unable to extract volumeID"}'
+		exit 1
+	fi
+
+	log "{\"status\": \"Success\", \"device\":\"${VOLUMEID}\"}"
+	exit 0
+}
+
+detach() {
+	VOLUMEID=$1
+	NODE_NAME=$2
+
+	success
+}
+
+mountdevice() {
+	MNTPATH=$1
+	DEV=$2
+	FSTYPE=$(echo "$3" | grep -Po '"kubernetes.io/fsType":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
+
+	if [ ! -b "${DEV}" ]; then
+		err "{\"status\": \"Failure\", \"message\": \"${DEV} does not exist\"}"
+		exit 1
+	fi
+
+	if [ "$(ismounted)" -eq "1" ] ; then
+		success
+	fi
+
+	VOLFSTYPE=$(blkid -o udev "${DEV}" 2>/dev/null | grep "ID_FS_TYPE"| cut -d"=" -f2)
+	if [ "${VOLFSTYPE}" = "" ]; then
+		CMD="mkfs -t ${FSTYPE}"
+		if [ "$FSTYPE" = "ext4" ]; then
+			CMD="${CMD} -F"
+		elif [ "$FSTYPE" = "xfs" ]; then
+			CMD="${CMD} -f"
+		fi
+		if ! ${CMD} "${DEV}" > /dev/null 2>&1; then
+			err "{\"status\": \"Failure\", \"message\": \"Failed to create fs ${FSTYPE} on device ${DEV}\"}"
+			exit 1
+		fi
+	fi
+
+	mkdir -p "${MNTPATH}" > /dev/null 2>&1
+	if ! mount --make-shared "${DEV}" "${MNTPATH}" > /dev/null 2>&1; then
+		debug "mount" "Failed to mount device ${DEV} at ${MNTPATH}"
+		err "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${DEV} at ${MNTPATH}\"}"
+		exit 1
+	elif ! chcon -t svirt_sandbox_file_t "${MNTPATH}" > /dev/null 2>&1; then
+		debug "mount" "-" "Failed to modify SELINUX properties for ${MNTPATH}"
+		err "{\"status\": \"Failure\", \"message\": \"Failed to modify SELINUX properties for ${MNTPATH}\"}"
+		exit 1
+	fi
+	success
+}
+
+unmountdevice() {
+	MNTPATH=$1
+	if [ "$(ismounted)" -eq "0" ] ; then success; fi
+	if ! umount "${MNTPATH}" > /dev/null 2>&1; then
+		err "{ \"status\": \"Failed\", \"message\": \"Failed to unmount volume at ${MNTPATH}\"}"
+		exit 1
+	fi
+	sleep 2
+	VOLUMEID=${MNTPATH##*/}
+	success
+}
+
+isattached() {
+	log "{\"status\": \"Success\", \"attached\":true}"
+	exit 0
+}
+
+waitforattach() {
+	EXPECTED_DEV=$1
+	JSON_PARAMS=$2
+	volidfromjson
+
+	DEV="/dev/disk/by-id/$(ls -1 /dev/disk/by-id | grep "\-${VOLUMEID}$")"
+
+	if [ -z "$DEV" ]; then
+		if [ "$SCALEIO_DEBUG" = "1" ]; then
+			printf "%s - waitforattach - %s - volume not found or mapped: %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "${VOLUMEID}" >> ${LOGFILE}
+		fi
+		err "{\"status\": \"Failure\", \"message\": \"Volume not attached\"}"
+		exit 1
+	fi
+
+	log "{\"status\": \"Success\", \"device\":\"${DEV}\"}"
+	exit 0
+}
+
+op=$1
+
+if [ "$op" = "init" ]; then
+	log "{\"status\":\"Success\",\"capabilities\":{\"attach\":true}}"
+	exit 0
+fi
+if [ "$#" -lt "2" ]; then usage; fi
+
+shift
+
+debug "$op" "$*"
+
+case "$op" in
+	attach)
+		attach "$@"
+		;;
+	detach)
+		detach "$@"
+		;;
+	waitforattach)
+		waitforattach "$@"
+		;;
+	mountdevice)
+		mountdevice "$@"
+		;;
+	unmountdevice)
+		unmountdevice "$@"
+		;;
+	isattached)
+		isattached "$@"
+		;;
+	getvolumename)
+		getvolumename "$@"
+		;;
+	*)
+		err "{\"status\": \"Not supported\"}"
+		exit 1
+esac
+
+exit 1
