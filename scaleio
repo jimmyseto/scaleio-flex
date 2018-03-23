@@ -153,10 +153,13 @@ mountdevice() {
 		debug "mount" "Failed to mount device ${DEV} at ${MNTPATH}"
 		err "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${DEV} at ${MNTPATH}\"}"
 		exit 1
-	elif ! chcon -t svirt_sandbox_file_t "${MNTPATH}" > /dev/null 2>&1; then
-		debug "mount" "-" "Failed to modify SELINUX properties for ${MNTPATH}"
-		err "{\"status\": \"Failure\", \"message\": \"Failed to modify SELINUX properties for ${MNTPATH}\"}"
-		exit 1
+	fi
+  if [ "${SELINUX_ENABLED}" = "1" ]; then
+		if ! chcon -t svirt_sandbox_file_t "${MNTPATH}" > /dev/null 2>&1; then
+			debug "mount" "-" "Failed to modify SELINUX properties for ${MNTPATH}"
+			err "{\"status\": \"Failure\", \"message\": \"Failed to modify SELINUX properties for ${MNTPATH}\"}"
+			exit 1
+		fi
 	fi
 	success
 }
