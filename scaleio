@@ -4,7 +4,10 @@
 SCALEIO_DEBUG="1"
 
 LOGFILE="/var/log/scaleio-flexvol.log"
-KUBECONFIG="$(ls -1 /etc/origin/node/system:node:*.kubeconfig)"
+
+# Set KUBECONFIG to point to desired config file; ensure specified config file exists on all nodes
+KUBECONFIG="/root/.kube/config"
+
 TOKEN="$(/opt/emc/scaleio/flexvol/get-token.sh)"
 
 # stderr
@@ -149,12 +152,14 @@ mountdevice() {
 	fi
 
 	mkdir -p "${MNTPATH}" > /dev/null 2>&1
+	SELINUX_STATUS=$(sestatus |grep 'SELinux status' | grep disabled)
+	SELINUX_ENABLED=$(echo $?)
 	if ! mount --make-shared "${DEV}" "${MNTPATH}" > /dev/null 2>&1; then
 		debug "mount" "Failed to mount device ${DEV} at ${MNTPATH}"
 		err "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${DEV} at ${MNTPATH}\"}"
 		exit 1
 	fi
-  if [ "${SELINUX_ENABLED}" = "1" ]; then
+	if [ "${SELINUX_ENABLED}" = "1" ]; then
 		if ! chcon -t svirt_sandbox_file_t "${MNTPATH}" > /dev/null 2>&1; then
 			debug "mount" "-" "Failed to modify SELINUX properties for ${MNTPATH}"
 			err "{\"status\": \"Failure\", \"message\": \"Failed to modify SELINUX properties for ${MNTPATH}\"}"
