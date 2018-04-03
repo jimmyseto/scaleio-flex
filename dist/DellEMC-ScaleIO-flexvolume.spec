@@ -7,7 +7,7 @@ Source0:        https://www.github.com/eric-young/scaleio-flex
 License:        none
 
 %global flexdir /usr/libexec/kubernetes/kubelet-plugins/volume/exec
-%global instdir /opt/emc/scaleio/flexvolume
+%global instdir /opt/emc/scaleio/flexvol
 
 %description
 FlexVolume driver for ScaleIO
