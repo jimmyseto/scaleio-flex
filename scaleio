@@ -6,8 +6,10 @@ SCALEIO_DEBUG="1"
 # Set KUBECONFIG to point to desired config file; ensure specified config file exists on all nodes
 KUBECONFIG="/root/.kube/config"
 
-TOKEN="$(/opt/emc/scaleio/flexvol/get-token.sh)"
+# Script that returns a token to be used for labeling
+TOKEN_SCRIPT="/opt/emc/scaleio/flexvol/get-token.sh"
 
+# full path to the logfile
 LOGFILE="/var/log/scaleio-flexvol.log"
 
 # stderr
@@ -236,6 +238,8 @@ if [ "$#" -lt "2" ]; then usage; fi
 shift
 
 debug "main" "$op" "$*"
+
+TOKEN="$(${TOKEN_SCRIPT})"
 
 case "$op" in
 	attach)
