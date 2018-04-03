@@ -36,7 +36,7 @@ ln -s -f %{instdir}/scaleio-simple %{flexdir}/dell~scaleio-simple/scaleio-simple
 
 %postun
 %{__rm} -f %{flexdir}/dell~scaleio/scaleio
-%{__rm} -f %{flexdir}/dell~scaleio/scaleio-simple
+%{__rm} -f %{flexdir}/dell~scaleio-simple/scaleio-simple
 
 %clean
 
