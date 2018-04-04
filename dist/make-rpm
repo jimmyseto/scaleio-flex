@@ -1,0 +1,31 @@
+#!/bin/bash
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+TOP_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )"
+JOB_NAME="DellEMC-ScaleIO-flexvolume"
+
+echo "SCRIPT DIR: ${SCRIPT_DIR}"
+echo "TOP_DIR:    ${TOP_DIR}"
+
+cd "${TOP_DIR}"
+
+testrel=$(/usr/bin/git diff HEAD~1 | awk '/[\t ]*\+[\t ]*Release/ {print "NEWREL"; exit 0 }')
+if [ "$testrel" != "NEWREL" ]; then
+    echo "There is no new release in the rpm spec files - do not rebuild."
+    #exit 0
+fi
+
+rm -rf rpmbuild ${JOB_NAME}.tar.gz
+mkdir -p rpmbuild/{BUILD,RPMS,SOURCES/${JOB_NAME},SPECS,SRPMS}
+tar --exclude-vcs --exclude='rpmbuild' -cp * | (cd rpmbuild/SOURCES/${JOB_NAME} ; tar xp)
+cd ${TOP_DIR}/rpmbuild/SOURCES
+tar -cvzf ${JOB_NAME}.tar.gz ${JOB_NAME}
+cd ${TOP_DIR}
+
+cp dist/*.spec rpmbuild/SPECS/
+sed -i "s/^[\t ]*Source0:.*/Source0: ${JOB_NAME}.tar.gz/g" rpmbuild/SPECS/*.spec
+sed -i "s/^[\t ]*%setup.*/%setup -n ${JOB_NAME}/g" rpmbuild/SPECS/*.spec
+rpmbuild --define "_topdir %(pwd)/rpmbuild" -ba rpmbuild/SPECS/*.spec
+
+
+
