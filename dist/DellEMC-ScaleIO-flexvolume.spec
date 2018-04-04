@@ -1,13 +1,20 @@
 Name:           DellEMC-ScaleIO-flexvolume
 Version:        0.1.0
 Release:        1
-Summary:        FlexVolume driver for ScaleIO 
+Summary:        FlexVolume driver for ScaleIO
 URL:            http://www.emc.com/
-Source0:        https://www.github.com/eric-young/scaleio-flex
-License:        none
+Source0:        https://www.github.com/
+License:        ASL 2.0
 
+# list of drivers to install
+%global drivers scaleio scaleio-simple
+
+# global settings
 %global flexdir /usr/libexec/kubernetes/kubelet-plugins/volume/exec
-%global instdir /opt/emc/scaleio/flexvol
+%global instdir /opt/emc/scaleio/flexvolume
+%global bindir %{instdir}/bin
+%global logdir %{instdir}/log
+%global cfgdir %{instdir}/cfg
 
 %description
 FlexVolume driver for ScaleIO
@@ -19,34 +26,41 @@ FlexVolume driver for ScaleIO
 
 %install
 rm -rf $RPM_BUILD_ROOT
-install -d $RPM_BUILD_ROOT%{instdir}
-mkdir -p $RPM_BUILD_ROOT%{flexdir}/dell~scaleio
-mkdir -p $RPM_BUILD_ROOT%{flexdir}/dell~scaleio-simple
-cp -a scaleio $RPM_BUILD_ROOT%{instdir}
-cp -a scaleio-simple $RPM_BUILD_ROOT%{instdir}
-cp -a get-token.sh $RPM_BUILD_ROOT%{instdir}
+install -d $RPM_BUILD_ROOT%{bindir}
+install -d $RPM_BUILD_ROOT%{logdir}
+install -d $RPM_BUILD_ROOT%{cfgdir}
+install -m 0666 LICENSE $RPM_BUILD_ROOT%{instdir}
+install -m 0755 get-token.sh $RPM_BUILD_ROOT%{bindir}
+for d in %{drivers}; do
+  install -d $RPM_BUILD_ROOT%{flexdir}/dell~${d}
+  install -m 0755 ${d} $RPM_BUILD_ROOT%{bindir}
+done
+
 
 %post
-ln -s -f %{instdir}/scaleio %{flexdir}/dell~scaleio/scaleio 
-ln -s -f %{instdir}/scaleio-simple %{flexdir}/dell~scaleio-simple/scaleio-simple
+for d in %{drivers}; do
+  ln -s -f %{bindir}/${d} %{flexdir}/dell~${d}/${d}
+done
 
 %pre
 
 %preun
 
 %postun
-%{__rm} -f %{flexdir}/dell~scaleio/scaleio
-%{__rm} -f %{flexdir}/dell~scaleio-simple/scaleio-simple
+for d in %{drivers}; do
+  %{__rm} -f %{flexdir}/dell~${d}/${d}
+done
 
 %clean
 
 %files
-%{instdir}/scaleio
-%{instdir}/scaleio-simple
-%{instdir}/get-token.sh
+%{instdir}/LICENSE
+%{bindir}/scaleio
+%{bindir}/scaleio-simple
+%{bindir}/get-token.sh
 %dir %{flexdir}/dell~scaleio
 %dir %{flexdir}/dell~scaleio-simple
-
-%defattr(744, root, root, -)
+%dir %{logdir}
+%dir %{cfgdir}
 
 %doc
