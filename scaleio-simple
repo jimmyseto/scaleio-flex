@@ -2,7 +2,9 @@
 
 SCALEIO_DEBUG="1"
 SELINUX_ENABLED="0"
-LOGFILE="/var/log/scaleio-flexvol.log"
+
+# full path to the logfile
+LOGFILE="/opt/emc/scaleio/flexvolume/log/scaleio-flexvol.log"
 
 # stderr
 err() {

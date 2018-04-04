@@ -7,10 +7,10 @@ SCALEIO_DEBUG="1"
 KUBECONFIG="/root/.kube/config"
 
 # Script that returns a token to be used for labeling
-TOKEN_SCRIPT="/opt/emc/scaleio/flexvol/get-token.sh"
+TOKEN_SCRIPT="/opt/emc/scaleio/flexvolume/bin/get-token.sh"
 
 # full path to the logfile
-LOGFILE="/var/log/scaleio-flexvol.log"
+LOGFILE="/opt/emc/scaleio/flexvolume/log/scaleio-flexvol.log"
 
 # stderr
 err() {
