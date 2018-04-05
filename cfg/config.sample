@@ -1,0 +1,41 @@
+#
+# Configuration file for ScaleIO FlexVolume Driver
+#
+
+# SCALEIO_DEBUG
+#
+# Enables verbose logging of the ScaleIO Driver
+# Set to "0" to disable
+# Set to "1" to enable
+#
+# Default value is "1"
+#
+SCALEIO_DEBUG="1"
+
+# KUBECONFIG
+#
+# Kubernetes config file for driver to utilize
+# Ensure specified config file exists on all nodes
+#
+# Default value is "/root/.kube/config"
+#
+KUBECONFIG="/root/.kube/config"
+
+# TOKEN_SCRIPT
+#
+# The ScaleIO Driver uses a token as authorization
+# for labeling physical volumes. Set this value to the path
+# of a script which returns a token to be used.
+# The default script will obtain a token associated with a
+# service account named 'scaleio-flex-volume'
+#
+# Default value is "/opt/emc/scaleio/flexvolume/bin/get-token.sh"
+#
+TOKEN_SCRIPT="/opt/emc/scaleio/flexvolume/bin/get-token.sh"
+
+# logfile
+# Full path to the ScaleIO FlexVolume logfile
+#
+# Default value is "/var/log/scaleio-flexvol.log"
+#
+LOGFILE="/var/log/scaleio-flexvol.log"
