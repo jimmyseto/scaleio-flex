@@ -13,7 +13,6 @@ License:        ASL 2.0
 %global flexdir /usr/libexec/kubernetes/kubelet-plugins/volume/exec
 %global instdir /opt/emc/scaleio/flexvolume
 %global bindir %{instdir}/bin
-%global logdir %{instdir}/log
 %global cfgdir %{instdir}/cfg
 
 %description
@@ -27,7 +26,6 @@ FlexVolume driver for ScaleIO
 %install
 rm -rf $RPM_BUILD_ROOT
 install -d $RPM_BUILD_ROOT%{bindir}
-install -d $RPM_BUILD_ROOT%{logdir}
 install -d $RPM_BUILD_ROOT%{cfgdir}
 install -m 0666 LICENSE $RPM_BUILD_ROOT%{instdir}
 install -m 0755 get-token.sh $RPM_BUILD_ROOT%{bindir}
@@ -60,7 +58,6 @@ done
 %{bindir}/get-token.sh
 %dir %{flexdir}/dell~scaleio
 %dir %{flexdir}/dell~scaleio-simple
-%dir %{logdir}
 %dir %{cfgdir}
 
 %doc

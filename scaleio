@@ -10,7 +10,7 @@ KUBECONFIG="/root/.kube/config"
 TOKEN_SCRIPT="/opt/emc/scaleio/flexvolume/bin/get-token.sh"
 
 # full path to the logfile
-LOGFILE="/opt/emc/scaleio/flexvolume/log/scaleio-flexvol.log"
+LOGFILE="/var/log/scaleio-flexvol.log"
 
 # stderr
 err() {
