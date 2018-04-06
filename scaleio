@@ -1,16 +1,9 @@
 #!/bin/sh
-
-# Uncomment line below to enable logging
-SCALEIO_DEBUG="1"
-
-# Set KUBECONFIG to point to desired config file; ensure specified config file exists on all nodes
-KUBECONFIG="/root/.kube/config"
-
-# Script that returns a token to be used for labeling
-TOKEN_SCRIPT="/opt/emc/scaleio/flexvol/get-token.sh"
-
-# full path to the logfile
-LOGFILE="/var/log/scaleio-flexvol.log"
+#
+# ScaleIO FlexVolume driver
+#
+# Do not modify thist script, configuration settings can be found at
+# /opt/emc/scaleio/flexvolume/cfg/config
 
 # stderr
 err() {
@@ -226,6 +219,20 @@ waitforattach() {
 	log $FUNCNAME "{\"status\": \"Success\", \"device\":\"${DEV}\"}"
 	exit 0
 }
+
+# MAIN
+
+CONFIGFILE="/opt/emc/scaleio/flexvolume/cfg/config"
+if [ -x "${CONFIGFILE}" ]; then
+  # source the config file
+	source "${CONFIGFILE}"
+fi
+
+# in case some values were not specific in the config file, set their values
+SCALEIO_DEBUG="${SCALEIO_DEBUG:-1}"
+KUBECONFIG="${KUBECONFIG:-/root/.kube/config}"
+TOKEN_SCRIPT="${TOKEN_SCRIPT:-/opt/emc/scaleio/flexvolume/bin/get-token.sh}"
+LOGFILE="${LOGFILE:-/var/log/scaleio-flexvol.log}"
 
 op=$1
 
