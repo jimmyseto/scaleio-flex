@@ -5,44 +5,49 @@
 # Do not modify thist script, configuration settings can be found at
 # /opt/emc/scaleio/flexvolume/cfg/config
 
-SELINUX_ENABLED="0"
-
 # stderr
 err() {
-	debug "failure status" "$*"
+	debug $*
+	shift
 	printf "%b" "$*" 1>&2
 }
 
 # stdout
 log() {
-	debug "success status" "$*"
+	debug $*
+	shift
 	printf "%b" "$*" >&1
 }
 
-# log file
+# log to file (if debug)
 debug() {
 	if [ "$SCALEIO_DEBUG" = "1" ]; then
-		printf "%s - %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$*" >> ${LOGFILE}
+		logtofile $*
 	fi
 }
 
+# log to file
+logtofile() {
+        function=$1
+        shift
+        printf "%s pid=%s func=%s msg=\"%s\"\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$$" "${function}" "$*" >> ${LOGFILE}
+}
+
 success() {
-	log '{"status": "Success"}'
+	log $1 '{"status": "Success"}'
 	exit 0
 }
 
 usage() {
-	err "error: invalid usage\n"
-	err "\t$0 init\n"
-	err "\t$0 attach <json params> <nodename>\n"
-	err "\t$0 detach <mount device> <nodename>\n"
-	err "\t$0 waitforattach <mount device> <json params>\n"
-	err "\t$0 mountdevice <mount dir> <mount device> <json params>\n"
-	err "\t$0 unmountdevice <mount dir>\n"
-	err "\t$0 isattached <json params> <nodename>\n"
+	err $FUNCNAME "error: invalid usage\n"
+	err $FUNCNAME "\t$0 init\n"
+	err $FUNCNAME "\t$0 attach <json params> <nodename>\n"
+	err $FUNCNAME "\t$0 detach <mount device> <nodename>\n"
+	err $FUNCNAME "\t$0 waitforattach <mount device> <json params>\n"
+	err $FUNCNAME "\t$0 mountdevice <mount dir> <mount device> <json params>\n"
+	err $FUNCNAME "\t$0 unmountdevice <mount dir>\n"
+	err $FUNCNAME "\t$0 isattached <json params> <nodename>\n"
 
-	err "\t$0 mount <mount dir> <mount device> <json params>\n"
-	err "\t$0 unmount <mount dir>\n"
 	exit 1
 }
 
@@ -56,7 +61,7 @@ ismounted() {
 volidfromjson() {
 	VOLUMEID=$(echo "${JSON_PARAMS}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
 	if [ -z "${VOLUMEID}" ] || [ "${VOLUMEID}" = null ]; then
-		err "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
+		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
 		exit 1
 	fi
 }
@@ -65,10 +70,10 @@ getvolumename() {
 	JSON_PARAMS=$1
 	VOLUMEID=$(echo "${JSON_PARAMS}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
 	if [ -z "${VOLUMEID}" ] || [ "${VOLUMEID}" = null ]; then
-		err "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
+		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
 		exit 1
 	fi
-	log "{\"status\": \"Success\", \"volumeName\": \"${VOLUMEID}\"}"
+	log $FUNCNAME "{\"status\": \"Success\", \"volumeName\": \"${VOLUMEID}\"}"
 	exit 0
 }
 
@@ -78,11 +83,11 @@ attach() {
 	volidfromjson
 
 	if [ -z "$VOLUMEID" ]; then
-		err '{"status": "Failure", "message": "Unable to extract volumeID"}'
+		err $FUNCNAME '{"status": "Failure", "message": "Unable to extract volumeID"}'
 		exit 1
 	fi
 
-	log "{\"status\": \"Success\", \"device\":\"${VOLUMEID}\"}"
+	log $FUNCNAME "{\"status\": \"Success\", \"device\":\"${VOLUMEID}\"}"
 	exit 0
 }
 
@@ -90,7 +95,7 @@ detach() {
 	VOLUMEID=$1
 	NODE_NAME=$2
 
-	success
+	success $FUNCNAME
 }
 
 mountdevice() {
@@ -99,12 +104,12 @@ mountdevice() {
 	FSTYPE=$(echo "$3" | grep -Po '"kubernetes.io/fsType":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
 
 	if [ ! -b "${DEV}" ]; then
-		err "{\"status\": \"Failure\", \"message\": \"${DEV} does not exist\"}"
+		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"${DEV} does not exist\"}"
 		exit 1
 	fi
 
 	if [ "$(ismounted)" -eq "1" ] ; then
-		success
+		success $FUNCNAME
 	fi
 
 	VOLFSTYPE=$(blkid -o udev "${DEV}" 2>/dev/null | grep "ID_FS_TYPE"| cut -d"=" -f2)
@@ -116,41 +121,43 @@ mountdevice() {
 			CMD="${CMD} -f"
 		fi
 		if ! ${CMD} "${DEV}" > /dev/null 2>&1; then
-			err "{\"status\": \"Failure\", \"message\": \"Failed to create fs ${FSTYPE} on device ${DEV}\"}"
+			err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Failed to create fs ${FSTYPE} on device ${DEV}\"}"
 			exit 1
 		fi
 	fi
 
 	mkdir -p "${MNTPATH}" > /dev/null 2>&1
+	SELINUX_STATUS=$(sestatus |grep 'SELinux status' | grep disabled)
+	SELINUX_ENABLED=$(echo $?)
 	if ! mount --make-shared "${DEV}" "${MNTPATH}" > /dev/null 2>&1; then
-		debug "mount" "Failed to mount device ${DEV} at ${MNTPATH}"
-		err "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${DEV} at ${MNTPATH}\"}"
+		debug $FUNCNAME "mount" "Failed to mount device ${DEV} at ${MNTPATH}"
+		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${DEV} at ${MNTPATH}\"}"
 		exit 1
 	fi
 	if [ "${SELINUX_ENABLED}" = "1" ]; then
 	  if ! chcon -t svirt_sandbox_file_t "${MNTPATH}" > /dev/null 2>&1; then
-		  debug "mount" "-" "Failed to modify SELINUX properties for ${MNTPATH}"
-		  err "{\"status\": \"Failure\", \"message\": \"Failed to modify SELINUX properties for ${MNTPATH}\"}"
+		  debug $FUNCNAME "mount" "-" "Failed to modify SELINUX properties for ${MNTPATH}"
+		  err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Failed to modify SELINUX properties for ${MNTPATH}\"}"
 		  exit 1
 		fi
 	fi
-	success
+	success $FUNCNAME
 }
 
 unmountdevice() {
 	MNTPATH=$1
-	if [ "$(ismounted)" -eq "0" ] ; then success; fi
+	if [ "$(ismounted)" -eq "0" ] ; then success $FUNCNAME; fi
 	if ! umount "${MNTPATH}" > /dev/null 2>&1; then
-		err "{ \"status\": \"Failed\", \"message\": \"Failed to unmount volume at ${MNTPATH}\"}"
+		err $FUNCNAME "{ \"status\": \"Failed\", \"message\": \"Failed to unmount volume at ${MNTPATH}\"}"
 		exit 1
 	fi
 	sleep 2
 	VOLUMEID=${MNTPATH##*/}
-	success
+	success $FUNCNAME
 }
 
 isattached() {
-	log "{\"status\": \"Success\", \"attached\":true}"
+	log $FUNCNAME "{\"status\": \"Success\", \"attached\":true}"
 	exit 0
 }
 
@@ -165,11 +172,11 @@ waitforattach() {
 		if [ "$SCALEIO_DEBUG" = "1" ]; then
 			printf "%s - waitforattach - %s - volume not found or mapped: %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "${VOLUMEID}" >> ${LOGFILE}
 		fi
-		err "{\"status\": \"Failure\", \"message\": \"Volume not attached\"}"
+		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Volume not attached\"}"
 		exit 1
 	fi
 
-	log "{\"status\": \"Success\", \"device\":\"${DEV}\"}"
+	log $FUNCNAME "{\"status\": \"Success\", \"device\":\"${DEV}\"}"
 	exit 0
 }
 
@@ -190,14 +197,14 @@ LOGFILE="${LOGFILE:-/var/log/scaleio-flexvol.log}"
 op=$1
 
 if [ "$op" = "init" ]; then
-	log "{\"status\":\"Success\",\"capabilities\":{\"attach\":true}}"
+	log "main" "{\"status\":\"Success\",\"capabilities\":{\"attach\":true}}"
 	exit 0
 fi
 if [ "$#" -lt "2" ]; then usage; fi
 
 shift
 
-debug "$op" "$*"
+debug "main" "$op" "$*"
 
 case "$op" in
 	attach)
@@ -222,7 +229,7 @@ case "$op" in
 		getvolumename "$@"
 		;;
 	*)
-		err "{\"status\": \"Not supported\"}"
+		err "main" "{\"status\": \"Not supported\"}"
 		exit 1
 esac
 

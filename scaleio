@@ -87,8 +87,8 @@ attach() {
 		exit 1
 	fi
 
-	VOLUME_ATTACHED=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attached}}')
-	VOLUME_ATTACHED_NODE=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attachedNode}}')
+	VOLUME_ATTACHED=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attached}}')
+	VOLUME_ATTACHED_NODE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attachedNode}}')
 	debug $FUNCNAME "attached:" "${VOLUME_ATTACHED}"
 	debug $FUNCNAME "attachedNode:" "${VOLUME_ATTACHED_NODE}"
 
@@ -104,8 +104,8 @@ attach() {
 		exit 1
 	fi
 
-	SET_LABEL_ATTACHED=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attached=true)
-	SET_LABEL_ATTACHED_NODE=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attachedNode=${NODE_NAME})
+	SET_LABEL_ATTACHED=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attached=true)
+	SET_LABEL_ATTACHED_NODE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attachedNode=${NODE_NAME})
 	debug $FUNCNAME "set_label_attached:" "${SET_LABEL_ATTACHED}"
 	debug $FUNCNAME "set_label_attachedNode:" "${SET_LABEL_ATTACHED_NODE}"
 
@@ -117,8 +117,8 @@ detach() {
 	VOLUMEID=$1
 	NODE_NAME=$2
 
-	SET_LABEL_ATTACHED=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attached=false)
-	SET_LABEL_ATTACHED_NODE=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attachedNode-)
+	SET_LABEL_ATTACHED=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attached=false)
+	SET_LABEL_ATTACHED_NODE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLUMEID} --overwrite attachedNode-)
 	debug $FUNCNAME "set_label_attached:" "${SET_LABEL_ATTACHED}"
 	debug $FUNCNAME "set_label_attachedNode:" "${SET_LABEL_ATTACHED_NODE}"
 
@@ -188,8 +188,8 @@ isattached() {
 	NODE_NAME=$2
 	volidfromjson
 
-	VOLUME_ATTACHED=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attached}}')
-	VOLUME_ATTACHED_NODE=$(${CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attachedNode}}')
+	VOLUME_ATTACHED=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attached}}')
+	VOLUME_ATTACHED_NODE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLUMEID} --template='{{.metadata.labels.attachedNode}}')
 	debug $FUNCNAME "attached:" "${VOLUME_ATTACHED}"
 	debug $FUNCNAME "attachedNode:" "${VOLUME_ATTACHED_NODE}"
 
@@ -251,10 +251,10 @@ TOKEN="$(${TOKEN_SCRIPT})"
 WHICH_OC=$(which oc > /dev/null 2>&1)
 WHICH_OC_RETURN=$(echo $?)
 if [ "${WHICH_OC_RETURN}" = "0" ]; then
-	CMD="oc"
+	CLI_CMD="oc"
 	CONFIG_OPTION="--config"
 else
-	CMD="kubectl"
+	CLI_CMD="kubectl"
 	CONFIG_OPTION="--kubeconfig"
 fi
 
