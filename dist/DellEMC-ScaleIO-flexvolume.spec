@@ -30,6 +30,7 @@ install -d $RPM_BUILD_ROOT%{cfgdir}
 install -m 0666 LICENSE $RPM_BUILD_ROOT%{instdir}
 install -m 0755 get-token.sh $RPM_BUILD_ROOT%{bindir}
 install -m 0755 cfg/config.sample $RPM_BUILD_ROOT%{cfgdir}
+install -m 0444 changes $RPM_BUILD_ROOT%{instdir}
 for d in %{drivers}; do
   install -d $RPM_BUILD_ROOT%{flexdir}/dell~${d}
   install -m 0755 ${d} $RPM_BUILD_ROOT%{bindir}
@@ -59,6 +60,7 @@ done
 
 %files
 %{instdir}/LICENSE
+%{instdir}/changes
 %{bindir}/scaleio
 %{bindir}/scaleio-simple
 %{bindir}/get-token.sh

@@ -15,6 +15,13 @@ if [ "$testrel" != "NEWREL" ]; then
     #exit 0
 fi
 
+GIT=`which git`
+if [ ! -z "${GIT}" ]; then
+  git log --pretty=medium > "${TOP_DIR}/changes"
+else
+  echo "RPM not created from a git clone, no changes available" > "${TOP_DIR}/changes"
+fi
+
 rm -rf rpmbuild ${JOB_NAME}.tar.gz
 mkdir -p rpmbuild/{BUILD,RPMS,SOURCES/${JOB_NAME},SPECS,SRPMS}
 tar --exclude-vcs --exclude='rpmbuild' -cp * | (cd rpmbuild/SOURCES/${JOB_NAME} ; tar xp)
@@ -26,6 +33,3 @@ cp dist/*.spec rpmbuild/SPECS/
 sed -i "s/^[\t ]*Source0:.*/Source0: ${JOB_NAME}.tar.gz/g" rpmbuild/SPECS/*.spec
 sed -i "s/^[\t ]*%setup.*/%setup -n ${JOB_NAME}/g" rpmbuild/SPECS/*.spec
 rpmbuild --define "_topdir %(pwd)/rpmbuild" -ba rpmbuild/SPECS/*.spec
-
-
-
