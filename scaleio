@@ -100,7 +100,7 @@ attach() {
 			log $FUNCNAME "{\"status\": \"Success\", \"device\":\"${VOLUMEID}\"}"
 			exit 0
 		fi
-		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Volume is in use by another pod\"}"
+		err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Volume is in use by another node\"}"
 		exit 1
 	fi
 
@@ -123,6 +123,44 @@ detach() {
 	debug $FUNCNAME "set_label_attachedNode:" "${SET_LABEL_ATTACHED_NODE}"
 
 	success $FUNCNAME
+}
+
+isvolumeinuse() {
+	RUNNING_PODS=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods | grep Running | awk '{print $1}')
+	debug $FUNCNAME "running pods:" "${RUNNING_PODS}"
+	for i in $RUNNING_PODS
+	do
+		FLEX_VOLUME_IDS=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${i} --template='{{range .spec.volumes}}{{.flexVolume.options.volumeID}} {{end}}' | sed -e 's/<no value>//g')
+		debug $FUNCNAME "FlexVolumes attached to pod $i:" "${FLEX_VOLUME_IDS}"
+		for j in ${FLEX_VOLUME_IDS}
+		do
+			if [ "${j}" = "${1}" ]; then
+				debug $FUNCNAME "Volume ${1} is in use by another pod ${i}"
+				echo 1
+				return
+			fi
+		done
+
+		PVCS=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod $i --template='{{range .spec.volumes}}{{.persistentVolumeClaim.claimName}} {{end}}' | sed -e 's/<no value>//g')
+		debug $FUNCNAME "PVCs attached to pod ${i}:" "${PVCS}"
+		for k in ${PVCS}
+		do
+			if [ "${k}" != "<no value>" ]; then
+				PVC_VOL_NAMES=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${k} --template='{{.spec.volumeName}}')
+				for m in ${PVC_VOL_NAMES}
+				do
+					if [ "${m}" = "${1}" ]; then
+						debug $FUNCNAME "Volume ${1} claimed by PVC ${k} is in use by another pod ${i}"
+						echo 1
+						return
+					fi
+				done
+			fi
+		done
+	done
+
+	echo 0
+	return
 }
 
 mountdevice() {
@@ -216,6 +254,15 @@ waitforattach() {
 		exit 1
 	fi
 
+	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
+		VOL_ATTACHED_TO_ANOTHER_POD=$(isvolumeinuse ${VOLUMEID})
+		debug $FUNCNAME "VOL_ATTACHED_TO_ANOTHER_POD:" "${VOL_ATTACHED_TO_ANOTHER_POD}"
+		if [ "${VOL_ATTACHED_TO_ANOTHER_POD}" = "1" ]; then
+			err $FUNCNAME "{\"status\": \"Failure\", \"message\": \"Volume ${VOLUMEID} is in use by another pod\"}"
+			exit 1
+		fi
+	fi
+
 	log $FUNCNAME "{\"status\": \"Success\", \"device\":\"${DEV}\"}"
 	exit 0
 }
@@ -223,8 +270,8 @@ waitforattach() {
 # MAIN
 
 CONFIGFILE="/opt/emc/scaleio/flexvolume/cfg/config"
-if [ -x "${CONFIGFILE}" ]; then
-  # source the config file
+if [ -f "${CONFIGFILE}" ]; then
+	# source the config file
 	source "${CONFIGFILE}"
 fi
 
@@ -233,6 +280,7 @@ SCALEIO_DEBUG="${SCALEIO_DEBUG:-1}"
 KUBECONFIG="${KUBECONFIG:-/root/.kube/config}"
 TOKEN_SCRIPT="${TOKEN_SCRIPT:-/opt/emc/scaleio/flexvolume/bin/get-token.sh}"
 LOGFILE="${LOGFILE:-/var/log/scaleio-flexvol.log}"
+ENABLE_ONE_POD_RESTRICTION="${ENABLE_ONE_POD_RESTRICTION:-0}"
 
 op=$1
 

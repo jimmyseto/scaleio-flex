@@ -9,9 +9,9 @@
 SERVICE_ACC=scaleio-flex-volume
 
 CONFIGFILE="/opt/emc/scaleio/flexvolume/cfg/config"
-if [ -x "${CONFIGFILE}" ]; then
-  # source the config file
-        source "${CONFIGFILE}"
+if [ -f "${CONFIGFILE}" ]; then
+	# source the config file
+	source "${CONFIGFILE}"
 fi
 
 # in case some values were not specific in the config file, set their values

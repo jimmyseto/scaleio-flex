@@ -33,9 +33,22 @@ KUBECONFIG="/root/.kube/config"
 #
 TOKEN_SCRIPT="/opt/emc/scaleio/flexvolume/bin/get-token.sh"
 
-# logfile
+# LOGFILE
+#
 # Full path to the ScaleIO FlexVolume logfile
 #
 # Default value is "/var/log/scaleio-flexvol.log"
 #
 LOGFILE="/var/log/scaleio-flexvol.log"
+
+# ENABLE_ONE_POD_RESTRICTION
+#
+# Enables feature that prevents a volume from being
+# attached/mounted if the volume is already attached
+# to another running pod.
+# If PVCs are being used, the name of the PVs to which
+# the PVCs are bound must be equivalent to the volumeID
+#
+# Default value is "0"
+#
+ENABLE_ONE_POD_RESTRICTION="0"

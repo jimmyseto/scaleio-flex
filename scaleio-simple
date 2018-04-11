@@ -183,8 +183,8 @@ waitforattach() {
 # MAIN
 
 CONFIGFILE="/opt/emc/scaleio/flexvolume/cfg/config"
-if [ -x "${CONFIGFILE}" ]; then
-  # source the config file
+if [ -f "${CONFIGFILE}" ]; then
+	# source the config file
 	source "${CONFIGFILE}"
 fi
 
