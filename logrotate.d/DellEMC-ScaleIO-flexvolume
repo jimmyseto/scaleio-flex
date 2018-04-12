@@ -1,0 +1,9 @@
+/var/log/scaleio-flexvol.log {
+    missingok
+    notifempty
+    size 2M
+    dateext
+    compress
+    rotate 12
+    create 0600 root root
+}
