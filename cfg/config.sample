@@ -52,3 +52,13 @@ LOGFILE="/var/log/scaleio-flexvol.log"
 # Default value is "0"
 #
 ENABLE_ONE_POD_RESTRICTION="0"
+
+# USELABELS
+# The FlexVolume driver can manage labels on the physical volumes
+# that denote the attached state and other attributes
+# Setting this variable to "1" will enable the labels, while
+# any other value disables the use of labels
+#
+# Default value is "1"
+#
+USELABELS="1"

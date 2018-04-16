@@ -7,7 +7,7 @@ Source0:        https://www.github.com/
 License:        ASL 2.0
 
 # list of drivers to install
-%global drivers scaleio scaleio-simple
+%global drivers scaleio
 
 # global settings
 %global flexdir /usr/libexec/kubernetes/kubelet-plugins/volume/exec
@@ -65,12 +65,10 @@ done
 %{instdir}/LICENSE
 %{instdir}/changes
 %{bindir}/scaleio
-%{bindir}/scaleio-simple
 %{bindir}/get-token.sh
 %{cfgdir}/config.sample
 %{logrotatedir}/DellEMC-ScaleIO-flexvolume
 %dir %{flexdir}/dell~scaleio
-%dir %{flexdir}/dell~scaleio-simple
 %dir %{cfgdir}
 
 %doc

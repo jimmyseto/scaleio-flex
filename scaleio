@@ -2,7 +2,7 @@
 #
 # ScaleIO FlexVolume driver
 #
-# Do not modify thist script, configuration settings can be found at
+# Do not modify this script, configuration settings can be found at
 # /opt/emc/scaleio/flexvolume/cfg/config
 
 # stderr
@@ -51,6 +51,63 @@ usage() {
 	exit 1
 }
 
+#########################################################
+# getlabelfromvolume
+# Arguments:
+#   $1: Volume ID
+#   $2: Label being requested
+# Returns:
+#   value of the label or "<no value>" if not found
+#########################################################
+getlabelfromvolume() {
+	if [ "$USELABELS" != "1" ]; then
+		return
+	fi
+	VOLID="${1}"
+	LABEL="${2}"
+	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLID} --template="{{.metadata.labels.${LABEL}}}")
+	debug $FUNCNAME "Retrieved Label from volume ${VOLID} ${LABEL}=${VALUE}"
+	echo "${VALUE}"
+}
+
+#########################################################
+# setlabelonvolume
+# Arguments:
+#   $1: Volume ID
+#   $2: Label being set
+#   $3: Value to set
+# Returns:
+#   Nothing
+#########################################################
+setlabelonvolume() {
+	if [ "$USELABELS" != "1" ]; then
+		return
+	fi
+	VOLID="${1}"
+	LABEL="${2}"
+	NEWVALUE="${3}"
+	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLID} --overwrite ${LABEL}=${NEWVALUE})
+	debug $FUNCNAME "Set label on volume ${VOLID} ${LABEL}=${NEWVALUE}"
+}
+
+#########################################################
+# clearlabelonvolume
+# Arguments:
+#   $1: Volume ID
+#   $2: Label to clear
+# Returns
+#   Nothing
+#########################################################
+clearlabelonvolume() {
+	if [ "$USELABELS" != "1" ]; then
+		return
+	fi
+	VOLID="${1}"
+	LABEL="${2}"
+	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLID} --overwrite ${LABEL}-)
+	debug $FUNCNAME "Cleared label on volume ${VOLID} ${LABEL}"
+}
+
 ismounted() {
 	local mntpath=$1
 	local mount=$(findmnt -n "${mntpath}" 2>/dev/null | cut -d' ' -f1)
@@ -88,11 +145,15 @@ attach() {
 		exit 1
 	fi
 
-	local volume_attached=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.metadata.labels.attached}}')
-	local volume_attached_node=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.metadata.labels.attachedNode}}')
-	debug ${FUNCNAME} "attached:" "${volume_attached}"
-	debug ${FUNCNAME} "attachedNode:" "${volume_attached_node}"
+	# if we are not using labels, return success as we assume all volumes
+	# are attached to all nodes
+	if [ "${USELABELS}" != "1" ]; then
+		log $FUNCNAME "{\"status\": \"Success\", \"device\":\"${volumeid}\"}"
+		exit 0
+	fi
 
+	local volume_attached=$(getlabelfromvolume ${volumeid} "attached")
+	local volume_attached_node=$(getlabelfromvolume ${volumeid} "attachedNode")
 	if [ -z "${volume_attached}" ]; then
 		volume_attached="false"
 	fi
@@ -105,10 +166,8 @@ attach() {
 		exit 1
 	fi
 
-	local set_label_attached=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${volumeid} --overwrite attached=true)
-	local set_local_attached_node=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${volumeid} --overwrite attachedNode=${node_name})
-	debug ${FUNCNAME} "set_label_attached:" "${set_label_attached}"
-	debug ${FUNCNAME} "set_label_attachedNode:" "${set_label_attached_node}"
+	setlabelonvolume ${volumeid} "attached" "true"
+	setlabelonvolume ${volumeid} "attachedNode" "${node_name}"
 
 	log ${FUNCNAME} "{\"status\": \"Success\", \"device\":\"${volumeid}\"}"
 	exit 0
@@ -117,10 +176,8 @@ attach() {
 detach() {
 	local volumeid=$1
 
-	local set_label_attached=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${volumeid} --overwrite attached=false)
-	local set_label_attached_node=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${volumeid} --overwrite attachedNode-)
-	debug ${FUNCNAME} "set_label_attached:" "${set_label_attached}"
-	debug ${FUNCNAME} "set_label_attachedNode:" "${set_label_attached_node}"
+	clearlabelonvolume ${volumeid} "attached"
+	clearlabelonvolume ${volumeid} "attachedNode"
 
 	success ${FUNCNAME}
 }
@@ -231,11 +288,15 @@ isattached() {
 	local node_name=$2
 	local volumeid=$(volidfromjson ${json_params})
 
-	local volume_attached=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.metadata.labels.attached}}')
-	local volume_attached_node=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.metadata.labels.attachedNode}}')
-	debug ${FUNCNAME} "attached:" "${volume_attached}"
-	debug ${FUNCNAME} "attachedNode:" "${volume_attached_node}"
+	# if we are not using labels, return success as we assume all volumes
+	# are attached to all nodes
+  if [ "${USELABELS}" != "1" ]; then
+		log $FUNCNAME "{\"status\": \"Success\", \"attached\":true}"
+		exit 0
+	fi
 
+	local volume_attached=$(getlabelfromvolume ${volumeid} "attached")
+	local volume_attached_node=$(getlabelfromvolume ${volumeid} "attachedNode")
 	if [ "${volume_attached}" = "true" ]; then
 		if [ "${volume_attached_node}" = "${node_name}" ]; then
 			log ${FUNCNAME} "{\"status\": \"Success\", \"attached\":true}"
@@ -286,6 +347,7 @@ KUBECONFIG="${KUBECONFIG:-/root/.kube/config}"
 TOKEN_SCRIPT="${TOKEN_SCRIPT:-/opt/emc/scaleio/flexvolume/bin/get-token.sh}"
 LOGFILE="${LOGFILE:-/var/log/scaleio-flexvol.log}"
 ENABLE_ONE_POD_RESTRICTION="${ENABLE_ONE_POD_RESTRICTION:-0}"
+USELABELS="${USELABELS:-1}"
 
 op=$1
 
