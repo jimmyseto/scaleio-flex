@@ -183,10 +183,10 @@ volidfromjson() {
 # Arguments:
 #   Nothing
 # Returns
-#   List of pods with Status of Running
+#   List of pods (namespace/pod) with Status of Running
 #########################################################
 getrunningpods() {
-	local running_pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods | grep Running | awk '{print $1}')
+	local running_pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods --all-namespaces=true | grep Running | awk '{printf "%s/%s\n", $1, $2}')
 	debug ${FUNCNAME} "Running pods:" "${running_pods}"
 	echo "${running_pods}"
 
@@ -195,42 +195,48 @@ getrunningpods() {
 #########################################################
 # getflexvolsforpod
 # Arguments:
-#   $1: Pod name
+#   $1: Namespace
+#   $2: Pod name
 # Returns
 #   List of FlexVolumes bound to specified pod
 #########################################################
 getflexvolsforpod() {
-	local pod=$1
-	local flex_volume_ids=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --template='{{range .spec.volumes}}{{.flexVolume.options.volumeID}} {{end}}' | sed -e 's/<no value>//g')
-	debug ${FUNCNAME} "FlexVolumes attached to pod ${pod}:" "${flex_volume_ids}"
+	local ns=$1
+	local pod=$2
+	local flex_volume_ids=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --namespace=${ns} --template='{{range .spec.volumes}}{{.flexVolume.options.volumeID}} {{end}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "FlexVolumes attached to pod ${ns}/${pod}:" "${flex_volume_ids}"
 	echo "${flex_volume_ids}"
 }
 
 #########################################################
 # getpvcsforpod
 # Arguments:
-#   $1: Pod name
+#   $1: Namespace
+#   $2: Pod name
 # Returns
-#   List of PVCs bound to specified pod
+#   List of PVCs bound to specified pod (namespace is implicit)
 #########################################################
 getpvcsforpod() {
-	local pod=$1
-	local pvcs=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --template='{{range .spec.volumes}}{{.persistentVolumeClaim.claimName}} {{end}}' | sed -e 's/<no value>//g')
-	debug ${FUNCNAME} "PVCs attached to pod ${pod}:" "${pvcs}"
+	local ns=$1
+	local pod=$2
+	local pvcs=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --namespace=${ns} --template='{{range .spec.volumes}}{{.persistentVolumeClaim.claimName}} {{end}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "PVCs attached to pod ${ns}/${pod}:" "${pvcs}"
 	echo "${pvcs}"
 }
 
 #########################################################
 # getvolsforpvc
 # Arguments:
-#   $1: PVC name
+#   $1: Namespace
+#   $2: PVC name
 # Returns
 #   List of volumes bound to specified PVC
 #########################################################
 getvolsforpvc() {
-	local pvc=$1
-	local pvc_vol_names=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${pvc} --template='{{.spec.volumeName}}' | sed -e 's/<no value>//g')
-	debug ${FUNCNAME} "Volumes attached to PVC ${pvc}:" "${pvc_vol_names}"
+	local ns=$1
+	local pvc=$2
+	local pvc_vol_names=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${pvc} --namespace=${ns} --template='{{.spec.volumeName}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "Volumes attached to PVC ${ns}/${pvc}:" "${pvc_vol_names}"
 	echo "${pvc_vol_names}"
 }
 
@@ -240,30 +246,36 @@ getvolsforpvc() {
 # Arguments:
 #   $1: Volume ID
 # Returns
-#   PVC bound to specified volume (if applicable)
+#   PVC (namespace/pvc) bound to specified volume (if applicable)
 #########################################################
 getpvcforvol() {
 	local volumeid=$1
+	local ns
 	local pvc
+	local nspvc
 	local status=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.status.phase}}' | sed -e 's/<no value>//g')
 	if [ ${status} = "Bound" ]; then
+		ns=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.spec.claimRef.namespace}}' | sed -e 's/<no value>//g')
 		pvc=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.spec.claimRef.name}}' | sed -e 's/<no value>//g')
-		debug ${FUNCNAME} "PVC attached to PV ${volumeid}:" "${pvc}"
+		nspvc="${ns}/${pvc}"
+		debug ${FUNCNAME} "PVC attached to PV ${volumeid}:" "${nspvc}"
 	fi
-	echo "${pvc}"
+	echo "${nspvc}"
 }
 
 #########################################################
 # getaccessmodesforpvc
 # Arguments:
-#   $1: PVC name
+#   $1: Namespace
+#   $2: PVC name
 # Returns
 #   Access modes set for specified PVC (if applicable)
 #########################################################
 getaccessmodesforpvc() {
-	local pvc=$1
-	local modes=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${pvc} --template='{{.status.accessModes}}' | sed -e 's/<no value>//g')
-	debug ${FUNCNAME} "Access modes for PVC ${pvc}:" "${modes}"
+	local ns=$1
+	local pvc=$2
+	local modes=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${pvc} --namespace=${ns} --template='{{.status.accessModes}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "Access modes for PVC ${ns}/${pvc}:" "${modes}"
 	echo "${modes}"
 }
 
@@ -291,11 +303,13 @@ getaccessmodesforvol() {
 #########################################################
 isvolumeinuse() {
 	local volumeid=$1
-	local running_pods=$(getrunningpods)
+	local ns_running_pods=$(getrunningpods)
 	local i
-	for i in ${running_pods}
+	for i in ${ns_running_pods}
 	do
-		local flex_volume_ids=$(getflexvolsforpod ${i})
+		local ns=$(echo $i | awk -F'/' '{print $1}')
+		local pod=$(echo $i | awk -F'/' '{print $2}')
+		local flex_volume_ids=$(getflexvolsforpod ${ns} ${pod})
 		local j
 		for j in ${flex_volume_ids}
 		do
@@ -306,12 +320,12 @@ isvolumeinuse() {
 			fi
 		done
 
-		local pvcs=$(getpvcsforpod ${i})
+		local pvcs=$(getpvcsforpod ${ns} ${pod})
 		local k
 		for k in ${pvcs}
 		do
 			if [ "${k}" != "<no value>" ]; then
-				local pvc_vol_names=$(getvolsforpvc ${k})
+				local pvc_vol_names=$(getvolsforpvc ${ns} ${k})
 				local m
 				for m in ${pvc_vol_names}
 				do
@@ -363,10 +377,12 @@ attach() {
 		volume_attached="false"
 	fi
 	if [ "${volume_attached}" = "true" ]; then
-		local pvc=$(getpvcforvol ${volumeid})
+		local nspvc=$(getpvcforvol ${volumeid})
 		local mode
-		if [ "${pvc}" != "" ]; then
-			mode=$(getaccessmodesforpvc ${pvc})
+		if [ "${nspvc}" != "" ]; then
+			local ns=$(echo ${nspvc} | awk -F'/' '{print $1}')
+			local pvc=$(echo ${nspvc} | awk -F'/' '{print $2}')
+			mode=$(getaccessmodesforpvc ${ns} ${pvc})
 		else
 			mode=$(getaccessmodesforvol ${volumeid})
 		fi
