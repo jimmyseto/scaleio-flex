@@ -5,39 +5,77 @@
 # Do not modify this script, configuration settings can be found at
 # /opt/emc/scaleio/flexvolume/cfg/config
 
-# stderr
+#########################################################
+# err
+# Arguments:
+#   $1: Name of calling function + error msg for stderr
+# Returns
+#   Nothing
+#########################################################
 err() {
 	debug $*
 	shift
 	printf "%b" "$*" 1>&2
 }
 
-# stdout
+#########################################################
+# log
+# Arguments:
+#   $1: Name of calling function + msg for stdout
+# Returns
+#   Nothing
+#########################################################
 log() {
 	debug $*
 	shift
 	printf "%b" "$*" >&1
 }
 
-# log to file (if debug)
+#########################################################
+# debug
+# Arguments:
+#   $1: Name of calling function + msg for debug log
+# Returns
+#   Nothing
+#########################################################
 debug() {
 	if [ "$SCALEIO_DEBUG" = "1" ]; then
 		logtofile $*
 	fi
 }
 
-# log to file
+#########################################################
+# logtofile
+# Arguments:
+#   $1: Name of calling function + msg for debug log
+# Returns
+#   Nothing
+#########################################################
 logtofile() {
 	function=$1
 	shift
 	printf "%s pid=%s func=%s msg=\"%s\"\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$$" "${function}" "$*" >> ${LOGFILE}
 }
 
+#########################################################
+# success
+# Arguments:
+#   $1: Name of calling function
+# Returns
+#   Nothing
+#########################################################
 success() {
 	log $1 '{"status": "Success"}'
 	exit 0
 }
 
+#########################################################
+# usage
+# Arguments:
+#   Nothing
+# Returns
+#   Nothing
+#########################################################
 usage() {
 	err ${FUNCNAME} "error: invalid usage\n"
 	err ${FUNCNAME} "\t$0 init\n"
@@ -66,7 +104,7 @@ getlabelfromvolume() {
 	VOLID="${1}"
 	LABEL="${2}"
 	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLID} --template="{{.metadata.labels.${LABEL}}}")
-	debug $FUNCNAME "Retrieved Label from volume ${VOLID} ${LABEL}=${VALUE}"
+	debug $FUNCNAME "Retrieved label from volume ${VOLID} ${LABEL}=${VALUE}"
 	echo "${VALUE}"
 }
 
@@ -108,12 +146,28 @@ clearlabelonvolume() {
 	debug $FUNCNAME "Cleared label on volume ${VOLID} ${LABEL}"
 }
 
+#########################################################
+# clearlabelonvolume
+# Arguments:
+#   $1: Volume ID
+#   $2: Label to clear
+# Returns
+#   Nothing
+#########################################################
 ismounted() {
 	local mntpath=$1
 	local mount=$(findmnt -n "${mntpath}" 2>/dev/null | cut -d' ' -f1)
 	if [ "${mount}" = "${mntpath}" ]; then echo 1; else echo 0; fi
 }
 
+#########################################################
+# clearlabelonvolume
+# Arguments:
+#   $1: Volume ID
+#   $2: Label to clear
+# Returns
+#   Nothing
+#########################################################
 volidfromjson() {
 	local json_params=$1
 	local volumeid=$(echo "${json_params}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
@@ -122,6 +176,157 @@ volidfromjson() {
 		exit 1
 	fi
 	echo ${volumeid}
+}
+
+#########################################################
+# getrunningpods
+# Arguments:
+#   Nothing
+# Returns
+#   List of pods with Status of Running
+#########################################################
+getrunningpods() {
+	local running_pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods | grep Running | awk '{print $1}')
+	debug ${FUNCNAME} "Running pods:" "${running_pods}"
+	echo "${running_pods}"
+
+}
+
+#########################################################
+# getflexvolsforpod
+# Arguments:
+#   $1: Pod name
+# Returns
+#   List of FlexVolumes bound to specified pod
+#########################################################
+getflexvolsforpod() {
+	local pod=$1
+	local flex_volume_ids=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --template='{{range .spec.volumes}}{{.flexVolume.options.volumeID}} {{end}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "FlexVolumes attached to pod ${pod}:" "${flex_volume_ids}"
+	echo "${flex_volume_ids}"
+}
+
+#########################################################
+# getpvcsforpod
+# Arguments:
+#   $1: Pod name
+# Returns
+#   List of PVCs bound to specified pod
+#########################################################
+getpvcsforpod() {
+	local pod=$1
+	local pvcs=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --template='{{range .spec.volumes}}{{.persistentVolumeClaim.claimName}} {{end}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "PVCs attached to pod ${pod}:" "${pvcs}"
+	echo "${pvcs}"
+}
+
+#########################################################
+# getvolsforpvc
+# Arguments:
+#   $1: PVC name
+# Returns
+#   List of volumes bound to specified PVC
+#########################################################
+getvolsforpvc() {
+	local pvc=$1
+	local pvc_vol_names=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${pvc} --template='{{.spec.volumeName}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "Volumes attached to PVC ${pvc}:" "${pvc_vol_names}"
+	echo "${pvc_vol_names}"
+}
+
+
+#########################################################
+# getpvcforvol
+# Arguments:
+#   $1: Volume ID
+# Returns
+#   PVC bound to specified volume (if applicable)
+#########################################################
+getpvcforvol() {
+	local volumeid=$1
+	local pvc
+	local status=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.status.phase}}' | sed -e 's/<no value>//g')
+	if [ ${status} = "Bound" ]; then
+		pvc=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.spec.claimRef.name}}' | sed -e 's/<no value>//g')
+		debug ${FUNCNAME} "PVC attached to PV ${volumeid}:" "${pvc}"
+	fi
+	echo "${pvc}"
+}
+
+#########################################################
+# getaccessmodesforpvc
+# Arguments:
+#   $1: PVC name
+# Returns
+#   Access modes set for specified PVC (if applicable)
+#########################################################
+getaccessmodesforpvc() {
+	local pvc=$1
+	local modes=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${pvc} --template='{{.status.accessModes}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "Access modes for PVC ${pvc}:" "${modes}"
+	echo "${modes}"
+}
+
+#########################################################
+# getaccessmodesforvol
+# Arguments:
+#   $1: Volume ID
+# Returns
+#   Access modes set for specified volume
+#########################################################
+getaccessmodesforvol() {
+	local volumeid=$1
+	local modes=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.spec.accessModes}}' | sed -e 's/<no value>//g')
+	debug ${FUNCNAME} "Access modes for PV ${volumeid}:" "${modes}"
+	echo "${modes}"
+}
+
+#########################################################
+# isvolumeinuse
+# Arguments:
+#   $1: Volume ID
+# Returns
+#   "1" if specified vol is being used by another pod
+#   "0" otherwise
+#########################################################
+isvolumeinuse() {
+	local volumeid=$1
+	local running_pods=$(getrunningpods)
+	local i
+	for i in ${running_pods}
+	do
+		local flex_volume_ids=$(getflexvolsforpod ${i})
+		local j
+		for j in ${flex_volume_ids}
+		do
+			if [ "${j}" = "${volumeid}" ]; then
+				debug ${FUNCNAME} "Volume ${volumeid} is in use by another pod ${i}"
+				echo 1
+				return
+			fi
+		done
+
+		local pvcs=$(getpvcsforpod ${i})
+		local k
+		for k in ${pvcs}
+		do
+			if [ "${k}" != "<no value>" ]; then
+				local pvc_vol_names=$(getvolsforpvc ${k})
+				local m
+				for m in ${pvc_vol_names}
+				do
+					if [ "${m}" = "${volumeid}" ]; then
+						debug ${FUNCNAME} "Volume ${volumeid} claimed by PVC ${k} is in use by another pod ${i}"
+						echo 1
+						return
+					fi
+				done
+			fi
+		done
+	done
+
+	echo 0
+	return
 }
 
 getvolumename() {
@@ -158,12 +363,22 @@ attach() {
 		volume_attached="false"
 	fi
 	if [ "${volume_attached}" = "true" ]; then
-		if [ "${volume_attached_node}" = "${node_name}" ]; then
-			log ${FUNCNAME} "{\"status\": \"Success\", \"device\":\"${volumeid}\"}"
-			exit 0
+		local pvc=$(getpvcforvol ${volumeid})
+		local mode
+		if [ "${pvc}" != "" ]; then
+			mode=$(getaccessmodesforpvc ${pvc})
+		else
+			mode=$(getaccessmodesforvol ${volumeid})
 		fi
-		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume is in use by another node\"}"
-		exit 1
+
+		# if accessMode is ReadWriteOnce and volume is already attached to a different node, fail this attach
+		if [ "${mode}" = "[ReadWriteOnce]" ] && [ "${volume_attached_node}" != "${node_name}" ]; then
+			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume is in use by another node\"}"
+			exit 1
+		fi
+
+		log ${FUNCNAME} "{\"status\": \"Success\", \"device\":\"${volumeid}\"}"
+		exit 0
 	fi
 
 	setlabelonvolume ${volumeid} "attached" "true"
@@ -180,49 +395,6 @@ detach() {
 	clearlabelonvolume ${volumeid} "attachedNode"
 
 	success ${FUNCNAME}
-}
-
-isvolumeinuse() {
-	local volumeid=$1
-	local running_pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods | grep Running | awk '{print $1}')
-	debug ${FUNCNAME} "running pods:" "${running_pods}"
-	local i
-	for i in ${running_pods}
-	do
-		local flex_volume_ids=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${i} --template='{{range .spec.volumes}}{{.flexVolume.options.volumeID}} {{end}}' | sed -e 's/<no value>//g')
-		debug ${FUNCNAME} "FlexVolumes attached to pod ${i}:" "${flex_volume_ids}"
-		local j
-		for j in ${flex_volume_ids}
-		do
-			if [ "${j}" = "${volumeid}" ]; then
-				debug ${FUNCNAME} "Volume ${volumeid} is in use by another pod ${i}"
-				echo 1
-				return
-			fi
-		done
-
-		local pvcs=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${i} --template='{{range .spec.volumes}}{{.persistentVolumeClaim.claimName}} {{end}}' | sed -e 's/<no value>//g')
-		debug ${FUNCNAME} "PVCs attached to pod ${i}:" "${pvcs}"
-		local k
-		for k in ${pvcs}
-		do
-			if [ "${k}" != "<no value>" ]; then
-				local pvc_vol_names=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pvc ${k} --template='{{.spec.volumeName}}')
-				local m
-				for m in ${pvc_vol_names}
-				do
-					if [ "${m}" = "${volumeid}" ]; then
-						debug ${FUNCNAME} "Volume ${volumeid} claimed by PVC ${k} is in use by another pod ${i}"
-						echo 1
-						return
-					fi
-				done
-			fi
-		done
-	done
-
-	echo 0
-	return
 }
 
 mountdevice() {
