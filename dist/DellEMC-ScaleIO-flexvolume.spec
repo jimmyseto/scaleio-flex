@@ -5,6 +5,7 @@ Summary:        FlexVolume driver for ScaleIO
 URL:            http://www.emc.com/
 Source0:        https://www.github.com/
 License:        ASL 2.0
+BuildArch:      noarch
 
 # list of drivers to install
 %global drivers scaleio
