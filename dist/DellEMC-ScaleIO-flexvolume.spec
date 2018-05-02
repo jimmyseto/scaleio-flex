@@ -5,6 +5,7 @@ Summary:        FlexVolume driver for ScaleIO
 URL:            http://www.emc.com/
 Source0:        https://www.github.com/
 License:        ASL 2.0
+BuildArch:      noarch
 
 # list of drivers to install
 %global drivers scaleio
@@ -56,7 +57,9 @@ fi
 
 %postun
 for d in %{drivers}; do
-  %{__rm} -f %{flexdir}/dell~${d}/${d}
+  if [ ! -f %{bindir}/${d} ]; then
+    %{__rm} -f %{flexdir}/dell~${d}/${d}
+  fi
 done
 
 %clean
