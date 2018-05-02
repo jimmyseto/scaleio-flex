@@ -1,0 +1,171 @@
+#!/bin/bash
+
+BASE_DIR="/opt/emc/scaleio/flexvolume"
+
+# files which are expected to exist
+VERIFY_FILES=(
+"${BASE_DIR}/LICENSE"
+"${BASE_DIR}/changes"
+"${BASE_DIR}/cfg/config"
+"${BASE_DIR}/bin/get-token.sh"
+"${BASE_DIR}/bin/scaleio"
+"/etc/logrotate.d/DellEMC-ScaleIO-flexvolume"
+)
+
+# links which are expected to exist
+VERIFY_LINKS=(
+"/usr/libexec/kubernetes/kubelet-plugins/volume/exec/dell~scaleio/scaleio"
+)
+
+# configuration options expected to exist
+VERIFY_CONFIG_OPTIONS=(
+SCALEIO_DEBUG
+KUBECONFIG
+TOKEN_SCRIPT
+LOGFILE
+ENABLE_ONE_POD_RESTRICTION
+USELABELS
+)
+
+ERRORS_FOUND=0
+
+#########################################################
+# message
+# Arguments:
+#   $1: message
+#########################################################
+message() {
+	printf "%b\n" "$*" 1>&2
+}
+
+#########################################################
+# error
+# Arguments:
+#   $1: message
+#########################################################
+error() {
+	message "ERROR:" "$*"
+	ERRORS_FOUND=$((ERROR_FOUND+1))
+}
+
+#########################################################
+# debug
+# Arguments:
+#   $1: message
+#########################################################
+debug() {
+	message "DEBUG:" "$*"
+}
+
+#########################################################
+# verify_files
+# Verifies that the proper files are present
+# Arguments:
+#   none
+#########################################################
+verify_files() {
+	  debug "Verifying files"
+
+		for F in ${VERIFY_FILES[@]}; do
+    if [ ! -f "${F}" ]; then
+      error "Cannot find file: ${F}"
+    else
+      debug "Found file: ${F}"
+    fi
+
+  done
+}
+
+#########################################################
+# verify_links
+# Verifies that the proper links are present
+# Arguments:
+#   none
+#########################################################
+verify_links() {
+	debug "Verifying links"
+
+	for F in ${VERIFY_LINKS[@]}; do
+    if [ ! -f "${F}" ]; then
+      error "Cannot find link: ${F}"
+    else
+      debug "Found link: ${F}"
+    fi
+  done
+}
+
+#########################################################
+# verify_config
+# Verifies that the configuration is valid
+# Arguments:
+#   none
+#########################################################
+verify_config() {
+  debug "Verifying configuration"
+
+	for C in ${VERIFY_CONFIG_OPTIONS[@]}; do
+	  line=$(grep "^${C}=" "${BASE_DIR}/cfg/config")
+		if [ -z "${line}" ]; then
+			error "Missing configuration value: ${C}"
+		else
+			debug "Found configuration value: ${line}"
+		fi
+	done
+}
+
+#########################################################
+# verify_installation
+# Verifies that the instalaltion is complete
+# Arguments:
+#   none
+#########################################################
+verify_installation() {
+	verify_files
+	verify_links
+	verify_config
+}
+
+
+#
+# Main script logic starts here
+#
+while getopts "r:u:h" opt; do
+  case $opt in
+    r)
+      RPM_TO_VERIFY="${OPTARG}"
+      ;;
+    u)
+      RPM_TO_UPGRADE_FROM="${OPTARG}"
+      ;;
+    \?)
+      echo "Invalid option: -$opt" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$opt requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+# install the RPM
+if [ ! -z "${RPM_TO_VERIFY}" ]; then
+  yum install -y "${RPM_TO_VERIFY}"
+fi
+
+# verify the installation
+verify_installation
+
+if [ ! -z "${RPM_TO_VERIFY}" ] && [ ! -z "${RPM_TO_UPGRADE_FROM}" ]; then
+	yum remove -y DellEMC-ScaleIO-flexvolume
+	yum install -y "${RPM_TO_UPGRADE_FROM}"
+	# modify the configuration to make sure changes are retained
+	for C in ${VERIFY_CONFIG_OPTIONS[@]}; do
+		sed -i "s|^${C}=.*|${C}=\"I have been changed\"|g" "${BASE_DIR}/cfg/config"
+	done
+	# now upgrade the RPM
+	yum install -y "${RPM_TO_VERIFY}"
+	verify_installation
+fi
+
+exit $ERRORS_FOUND
