@@ -46,12 +46,33 @@ LOGFILE="/var/log/scaleio-flexvol.log"
 # Enables feature that prevents a volume from being
 # attached/mounted if the volume is already attached
 # to another running pod.
+#
 # If PVCs are being used, the name of the PVs to which
 # the PVCs are bound must be equivalent to the volumeID
 #
+# Default value is "1"
+#
+ENABLE_ONE_POD_RESTRICTION="1"
+
+# ENABLE_SAME_NODE_AUTO_FAILOVER_FOR_ONE_POD_RESTRICTION
+#
+# Enables feature, when ENABLE_ONE_POD_RESTRICTION is turned on as well,
+# that automatically releases a ReadWriteOnce volume when the pod to which
+# it is bound terminates so that another pod on the same node
+# can consume the volume.  This will happen only if the status of all
+# pods are known (i.e. no "Unknown" pods).  If pods on different nodes
+# want to consume the volume though, manual intervention is required.
+#
+# When this feature disabled, manual intervention is required
+# to release the volume from the terminated pod so that other pods
+# (regardless of which node they reside on) can consume the volume.
+#
+# If ENABLE_ONE_POD_RESTRICTION is disabled, the value of this parameter
+# is benign.
+#
 # Default value is "0"
 #
-ENABLE_ONE_POD_RESTRICTION="0"
+ENABLE_SAME_NODE_AUTO_FAILOVER_FOR_ONE_POD_RESTRICTION="0"
 
 # USELABELS
 # The FlexVolume driver can manage labels on the physical volumes

@@ -147,12 +147,11 @@ clearlabelonvolume() {
 }
 
 #########################################################
-# clearlabelonvolume
+# ismounted
 # Arguments:
-#   $1: Volume ID
-#   $2: Label to clear
+#   $1: Mount path
 # Returns
-#   Nothing
+#   1 if specified path mounted; else 0
 #########################################################
 ismounted() {
 	local mntpath=$1
@@ -161,12 +160,11 @@ ismounted() {
 }
 
 #########################################################
-# clearlabelonvolume
+# volidfromjson
 # Arguments:
-#   $1: Volume ID
-#   $2: Label to clear
+#   $1: JSON
 # Returns
-#   Nothing
+#   Volume ID
 #########################################################
 volidfromjson() {
 	local json_params=$1
@@ -179,16 +177,16 @@ volidfromjson() {
 }
 
 #########################################################
-# getrunningpods
+# getrunningorunknownpods
 # Arguments:
 #   Nothing
 # Returns
-#   List of pods (namespace/pod) with Status of Running
+#   List of pods (namespace/pod) with Status of Running or Unknown
 #########################################################
-getrunningpods() {
-	local running_pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods --all-namespaces=true | grep Running | awk '{printf "%s/%s\n", $1, $2}')
-	debug ${FUNCNAME} "Running pods:" "${running_pods}"
-	echo "${running_pods}"
+getrunningorunknownpods() {
+	local pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods --all-namespaces=true | grep -E 'Running|Unknown' | awk '{printf "%s/%s\n", $1, $2}')
+	debug ${FUNCNAME} "Running or Unknown pods:" "${pods}"
+	echo "${pods}"
 
 }
 
@@ -240,7 +238,6 @@ getvolsforpvc() {
 	echo "${pvc_vol_names}"
 }
 
-
 #########################################################
 # getpvcforvol
 # Arguments:
@@ -259,8 +256,8 @@ getpvcforvol() {
 		pvc=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volumeid} --template='{{.spec.claimRef.name}}' | sed -e 's/<no value>//g')
 		nspvc="${ns}/${pvc}"
 		debug ${FUNCNAME} "PVC attached to PV ${volumeid}:" "${nspvc}"
+		echo "${nspvc}"
 	fi
-	echo "${nspvc}"
 }
 
 #########################################################
@@ -294,18 +291,17 @@ getaccessmodesforvol() {
 }
 
 #########################################################
-# isvolumeinuse
+# getpodboundtovol
 # Arguments:
 #   $1: Volume ID
 # Returns
-#   "1" if specified vol is being used by another pod
-#   "0" otherwise
+#   Name of running pod (namespace/pod) bound to specified volume
 #########################################################
-isvolumeinuse() {
+getpodboundtovol() {
 	local volumeid=$1
-	local ns_running_pods=$(getrunningpods)
+	local ns_running_or_unknown_pods=$(getrunningorunknownpods)
 	local i
-	for i in ${ns_running_pods}
+	for i in ${ns_running_or_unknown_pods}
 	do
 		local ns=$(echo $i | awk -F'/' '{print $1}')
 		local pod=$(echo $i | awk -F'/' '{print $2}')
@@ -314,8 +310,8 @@ isvolumeinuse() {
 		for j in ${flex_volume_ids}
 		do
 			if [ "${j}" = "${volumeid}" ]; then
-				debug ${FUNCNAME} "Volume ${volumeid} is in use by another pod ${i}"
-				echo 1
+				debug ${FUNCNAME} "Volume ${volumeid} is in use by pod ${i}"
+				echo ${i}
 				return
 			fi
 		done
@@ -330,8 +326,8 @@ isvolumeinuse() {
 				for m in ${pvc_vol_names}
 				do
 					if [ "${m}" = "${volumeid}" ]; then
-						debug ${FUNCNAME} "Volume ${volumeid} claimed by PVC ${k} is in use by another pod ${i}"
-						echo 1
+						debug ${FUNCNAME} "Volume ${volumeid} claimed by PVC ${k} is in use by pod ${i}"
+						echo ${i}
 						return
 					fi
 				done
@@ -339,8 +335,51 @@ isvolumeinuse() {
 		done
 	done
 
-	echo 0
 	return
+}
+
+#########################################################
+# getpodstatus
+# Arguments:
+#   $1: Namespace
+#   $2: Pod name
+# Returns
+#   Status of specified pod
+#########################################################
+getpodstatus() {
+	local ns=$1
+	local pod=$2
+
+	local status=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pod ${pod} --namespace=${ns} --template='{{.status.phase}}' | sed -e 's/<no value>//g')
+	if [ "$?" = 0 ]; then
+		debug ${FUNCNAME} "Status of pod ${ns}/${pod}:" "${status}"
+		echo ${status}
+	else
+		debug ${FUNCNAME} "Pod ${ns}/${pod} not found"
+	fi
+}
+
+#########################################################
+# refreshattachedtopod
+# Arguments:
+#   $1: Volume ID
+# Returns
+#   Nothing
+#########################################################
+refreshattachedtopod() {
+	local volumeid=$1
+	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
+		local volume_attached_to_pod=$(getlabelfromvolume ${volumeid} "attachedToPod")
+		if [ "${volume_attached_to_pod}" = "true" ]; then
+			local nspod=$(getpodboundtovol ${volumeid})
+			if [ -z ${nspod} ]; then
+				# proactively clear attachedToPod label only if the following two criteria are met:
+				# - there are no Running pods bound to the specified volume
+				# - there are no Unknown pods potential bound to the specified volume (we don't want to assume)
+				clearlabelonvolume ${volumeid} "attachedToPod"
+			fi
+		fi
+	fi
 }
 
 getvolumename() {
@@ -379,12 +418,12 @@ attach() {
 	if [ "${volume_attached}" = "true" ]; then
 		local nspvc=$(getpvcforvol ${volumeid})
 		local mode
-		if [ "${nspvc}" != "" ]; then
+		if [ -z "${nspvc}" ]; then
+			mode=$(getaccessmodesforvol ${volumeid})
+		else
 			local ns=$(echo ${nspvc} | awk -F'/' '{print $1}')
 			local pvc=$(echo ${nspvc} | awk -F'/' '{print $2}')
 			mode=$(getaccessmodesforpvc ${ns} ${pvc})
-		else
-			mode=$(getaccessmodesforvol ${volumeid})
 		fi
 
 		# if accessMode is ReadWriteOnce and volume is already attached to a different node, fail this attach
@@ -409,6 +448,10 @@ detach() {
 
 	clearlabelonvolume ${volumeid} "attached"
 	clearlabelonvolume ${volumeid} "attachedNode"
+
+	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
+		clearlabelonvolume ${volumeid} "attachedToPod"
+	fi
 
 	success ${FUNCNAME}
 }
@@ -478,9 +521,14 @@ isattached() {
 
 	# if we are not using labels, return success as we assume all volumes
 	# are attached to all nodes
-  if [ "${USELABELS}" != "1" ]; then
+	if [ "${USELABELS}" != "1" ]; then
 		log $FUNCNAME "{\"status\": \"Success\", \"attached\":true}"
 		exit 0
+	fi
+
+	if [ "${ENABLE_SAME_NODE_AUTO_FAILOVER_FOR_ONE_POD_RESTRICTION}" = "1" ]; then
+		# proactively clear attachedToPod label if deemed safe to do so
+		refreshattachedtopod ${volumeid}
 	fi
 
 	local volume_attached=$(getlabelfromvolume ${volumeid} "attached")
@@ -491,6 +539,7 @@ isattached() {
 			exit 0
 		fi
 	fi
+
 	log ${FUNCNAME} "{\"status\": \"Success\", \"attached\":false}"
 	exit 0
 }
@@ -509,11 +558,12 @@ waitforattach() {
 	fi
 
 	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
-		local vol_attached_to_another_pod=$(isvolumeinuse ${volumeid})
-		debug ${FUNCNAME} "vol_attached_to_another_pod:" "${vol_attached_to_another_pod}"
-		if [ "${vol_attached_to_another_pod}" = "1" ]; then
-			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume ${volumeid} is in use by another pod\"}"
+		local volume_attached_to_pod=$(getlabelfromvolume ${volumeid} "attachedToPod")
+		if [ "${volume_attached_to_pod}" = "true" ]; then
+			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume ${volumeid} is in use by another pod ${bound_pod}\"}"
 			exit 1
+		else
+			setlabelonvolume ${volumeid} "attachedToPod" "true"
 		fi
 	fi
 
