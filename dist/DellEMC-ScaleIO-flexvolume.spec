@@ -57,7 +57,9 @@ fi
 
 %postun
 for d in %{drivers}; do
-  %{__rm} -f %{flexdir}/dell~${d}/${d}
+  if [ ! -f %{bindir}/${d} ]; then
+    %{__rm} -f %{flexdir}/dell~${d}/${d}
+  fi
 done
 
 %clean
