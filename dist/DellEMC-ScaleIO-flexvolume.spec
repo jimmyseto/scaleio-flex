@@ -16,6 +16,7 @@ BuildArch:      noarch
 %global logrotatedir /etc/logrotate.d
 %global bindir %{instdir}/bin
 %global cfgdir %{instdir}/cfg
+%global instlog %{instdir}/install.log
 
 %description
 FlexVolume driver for ScaleIO
@@ -45,10 +46,41 @@ done
 for d in %{drivers}; do
   ln -s -f %{bindir}/${d} %{flexdir}/dell~${d}/${d}
 done
+
+# see if the config file exists
+# if not, just create it and we are done
+echo "Processing configuration file" >> %instlog
 if [ ! -f %{cfgdir}/config ]; then
   cp %{cfgdir}/config.sample %{cfgdir}/config
 else
-  cp %{cfgdir}/config.sample %{cfgdir}/config.new
+  CONFIG=%{cfgdir}/config
+  CONFIG_OLD=%{cfgdir}/config.old
+  CONFIG_NEW=%{cfgdir}/config.new
+
+  # the config file exists
+  cp %{cfgdir}/config.sample "${CONFIG_NEW}"
+  cp %{cfgdir}/config "${CONFIG_OLD}"
+
+  while read line
+  do
+    if [[ ${line:0:1} == [[:alnum:]] ]]
+    then
+      key=${line%=*}
+      newline=$(grep "^${key}=" "${CONFIG_NEW}")
+      if [ -z "${newline}" ]
+      then
+        echo "Found deprecated key: ${line}" >> %instlog
+      elif [ "${newline}" != "${line}" ]
+      then
+        echo "Replacing: ${newline}"  >> %instlog
+        echo "   with current value: ${line}"  >> %instlog
+        sed -i "s|^${key}=.*|${line}|g" "${CONFIG_NEW}"
+      fi
+    fi
+  done < "${CONFIG_OLD}"
+
+  # done processing the file
+  mv "${CONFIG_NEW}" "${CONFIG}"
 fi
 
 %pre
