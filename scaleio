@@ -65,7 +65,7 @@ logtofile() {
 #   Nothing
 #########################################################
 success() {
-	log $1 '{"status": "Success"}'
+	log $1 "{\"status\": \"Success\"}"
 	exit 0
 }
 
@@ -83,7 +83,9 @@ usage() {
 	err ${FUNCNAME} "\t$0 detach <mount device> <nodename>\n"
 	err ${FUNCNAME} "\t$0 waitforattach <mount device> <json params>\n"
 	err ${FUNCNAME} "\t$0 mountdevice <mount dir> <mount device> <json params>\n"
+	err ${FUNCNAME} "\t$0 mount <mount dir> <json params>\n"
 	err ${FUNCNAME} "\t$0 unmountdevice <mount dir>\n"
+	err ${FUNCNAME} "\t$0 unmount <mount dir>\n"
 	err ${FUNCNAME} "\t$0 isattached <json params> <nodename>\n"
 
 	exit 1
@@ -101,11 +103,11 @@ getlabelfromvolume() {
 	if [ "$USELABELS" != "1" ]; then
 		return
 	fi
-	VOLID="${1}"
-	LABEL="${2}"
-	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${VOLID} --template="{{.metadata.labels.${LABEL}}}")
-	debug $FUNCNAME "Retrieved label from volume ${VOLID} ${LABEL}=${VALUE}"
-	echo "${VALUE}"
+	local volid="${1}"
+	local label="${2}"
+	local value=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volid} --template="{{.metadata.labels.${label}}}")
+	debug $FUNCNAME "Retrieved label from volume ${volid} ${label}=${value}"
+	echo "${value}"
 }
 
 #########################################################
@@ -115,17 +117,26 @@ getlabelfromvolume() {
 #   $2: Label being set
 #   $3: Value to set
 # Returns:
-#   Nothing
+#   0 if success
+#   1 if failure
 #########################################################
 setlabelonvolume() {
 	if [ "$USELABELS" != "1" ]; then
+		echo 0
 		return
 	fi
-	VOLID="${1}"
-	LABEL="${2}"
-	NEWVALUE="${3}"
-	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLID} --overwrite ${LABEL}=${NEWVALUE})
-	debug $FUNCNAME "Set label on volume ${VOLID} ${LABEL}=${NEWVALUE}"
+	local volid="${1}"
+	local label="${2}"
+	local newvalue="${3}"
+	local value=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${volid} --overwrite=false ${label}=${newvalue})
+	local ret=$(echo $?)
+	if [ "${ret}" = "0" ]; then
+		debug $FUNCNAME "Set label on volume ${volid} ${label}=${newvalue} succeeded: ${value}"
+	else
+		debug $FUNCNAME "Set label on volume ${volid} ${label}=${newvalue} failed: ${value}"
+	fi
+	echo ${ret}
+
 }
 
 #########################################################
@@ -382,6 +393,56 @@ refreshattachedtopod() {
 	fi
 }
 
+#########################################################
+# accessmodefromjson
+# Arguments:
+#   $1: JSON
+# Returns
+#   Access mode
+#########################################################
+accessmodefromjson() {
+	local json_params=$1
+	local mode=$(echo "${json_params}" | grep -Po 'readwrite":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
+	if [ -z "${mode}" ] || [ "${mode}" = null ]; then
+		debug ${FUNCNAME} "Unable to extract access mode"
+		exit 1
+	fi
+	echo ${mode}
+}
+
+#########################################################
+# ismountmodeprohibited
+# Arguments:
+#   $1: Mount access mode
+#   $1: Volume ID
+# Returns
+#   1 if mount mode prohibited (based on accessMode of volume)
+#   0 otherwise
+#########################################################
+ismountmodeprohibited() {
+	local mode_requested=$1
+	local volumeid=$2
+
+	local pvcforvol=$(getpvcforvol ${volumeid})
+	local pvpvc_mode
+	if [ ! -z "${nspvc}" ]; then
+		local ns=$(echo ${nspvc} | awk -F'/' '{print $1}')
+		local pvc=$(echo ${nspvc} | awk -F'/' '{print $2}')
+		pvpvc_mode=$(getaccessmodesforpvc ${ns} ${pvc})
+	else
+		pvpvc_mode=$(getaccessmodesforvol ${volumeid})
+	fi
+	debug ${FUNCNAME} "mount access mode requested:" "${mode_requested}"
+	debug ${FUNCNAME} "PV/PVC access mode:" "${pvpvc_mode}"
+
+	if [ "${pvpvc_mode}" != "[ReadWriteOnce]" ] && [ "${mode_requested}" = "rw" ]; then
+		debug ${FUNCNAME} "Attempting to mount ReadOnly volume ${volumeid} as ReadWrite"
+		echo 1
+	else
+		echo 0
+	fi
+}
+
 getvolumename() {
 	local json_params=$1
 	local volumeid=$(echo "${json_params}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
@@ -436,8 +497,10 @@ attach() {
 		exit 0
 	fi
 
-	setlabelonvolume ${volumeid} "attached" "true"
-	setlabelonvolume ${volumeid} "attachedNode" "${node_name}"
+	if [ "$(setlabelonvolume ${volumeid} "attached" "true")" = "1" ] || [ "$(setlabelonvolume ${volumeid} "attachedNode" "${node_name}")" = "1" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attached/attachedNode labels\"}"
+		exit 1
+	fi
 
 	log ${FUNCNAME} "{\"status\": \"Success\", \"device\":\"${volumeid}\"}"
 	exit 0
@@ -471,6 +534,24 @@ mountdevice() {
 		success ${FUNCNAME}
 	fi
 
+	local volumeid=$(volidfromjson ${json_params})
+	if [ -z "${volumeid}" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
+		exit 1
+	fi
+
+	local mode_requested=$(accessmodefromjson ${json_params})
+	if [ -z "${mode_requested}" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Unable to extract access mode\"}"
+		exit 1
+	fi
+
+	local isprohibited=$(ismountmodeprohibited ${mode_requested} ${volumeid})
+	if [ "${isprohibited}" = "1" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Attempting to mount ReadOnly volume ${volumeid} as ReadWrite\"}"
+		exit 1
+	fi
+
 	local volfstype=$(blkid -o udev "${dev}" 2>/dev/null | grep "ID_FS_TYPE"| cut -d"=" -f2)
 	if [ "${volfstype}" = "" ]; then
 		local cmd="mkfs -t ${fstype}"
@@ -488,11 +569,12 @@ mountdevice() {
 	mkdir -p "${mntpath}" > /dev/null 2>&1
 	local selinux_status=$(sestatus |grep 'SELinux status' | grep disabled)
 	local selinux_enabled=$(echo $?)
-	if ! mount --make-shared "${dev}" "${mntpath}" > /dev/null 2>&1; then
+	if ! command mount --make-shared -o "${mode_requested}" "${dev}" "${mntpath}" > /dev/null 2>&1; then
 		debug ${FUNCNAME} "Failed to mount device ${dev} at ${mntpath}"
 		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${dev} at ${mntpath}\"}"
 		exit 1
 	fi
+
 	if [ "${selinux_enabled}" = "1" ]; then
 		if ! chcon -t svirt_sandbox_file_t "${mntpath}" > /dev/null 2>&1; then
 			debug ${FUNCNAME} "Failed to modify SELINUX properties for ${mntpath}"
@@ -500,6 +582,56 @@ mountdevice() {
 			exit 1
 		fi
 	fi
+
+	success ${FUNCNAME}
+}
+
+mount() {
+	local mntpath=$1
+	local json_params=$2
+
+	if [ "$(ismounted ${mntpath})" = "1" ] ; then
+		success ${FUNCNAME}
+	fi
+
+	local volumeid=$(volidfromjson ${json_params})
+	if [ -z "${volumeid}" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Unable to extract volumeID\"}"
+		exit 1
+	fi
+
+	local mode_requested=$(accessmodefromjson ${json_params})
+	if [ -z "${mode_requested}" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Unable to extract access mode\"}"
+		exit 1
+	fi
+
+	# ismountmodeprohibited check is not really needed here because...
+	# 1.  mount does not get called unless mountdevice succeeds
+	# 2.  mountdevice already performs this check
+	# 3.  k8s currently ignores accessModes for .spec.containers.volumeMounts.readOnly, and hard-codes
+	#     kubernetes.io/readwrite to be consistent the mode used in the preceding/successful mountdevice call
+	# ...but, we do it just in case
+	local isprohibited=$(ismountmodeprohibited ${mode_requested} ${volumeid})
+	if [ "${isprohibited}" = "1" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Attempting to mount ReadOnly volume ${volumeid} as ReadWrite\"}"
+		exit 1
+	fi
+
+	local dev="/dev/disk/by-id/$(ls -1 /dev/disk/by-id | grep "\-${volumeid}$")"
+	if [ -z "${dev}" ]; then
+		debug ${FUNCNAME} "${volumeid}" "not found or mapped"
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume not found ${volumeid}\"}"
+		exit 1
+	fi
+
+	mkdir -p "${mntpath}" > /dev/null 2>&1
+	if ! command mount --make-shared -o "${mode_requested}" "${dev}" "${mntpath}" > /dev/null 2>&1; then
+		debug ${FUNCNAME} "Failed to mount device ${dev} at ${mntpath}"
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to mount device ${dev} at ${mntpath}\"}"
+		exit 1
+	fi
+
 	success ${FUNCNAME}
 }
 
@@ -507,7 +639,7 @@ unmountdevice() {
 	local mntpath=$1
 	if [ "$(ismounted ${mntpath})" = "0" ] ; then success ${FUNCNAME}; fi
 	if ! umount "${mntpath}" > /dev/null 2>&1; then
-		err ${FUNCNAME} "{ \"status\": \"Failed\", \"message\": \"Failed to unmount volume at ${mntpath}\"}"
+		err ${FUNCNAME} "{\"status\": \"Failed\", \"message\": \"Failed to unmount volume at ${mntpath}\"}"
 		exit 1
 	fi
 	sleep 2
@@ -560,10 +692,13 @@ waitforattach() {
 	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
 		local volume_attached_to_pod=$(getlabelfromvolume ${volumeid} "attachedToPod")
 		if [ "${volume_attached_to_pod}" = "true" ]; then
-			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume ${volumeid} is in use by another pod ${bound_pod}\"}"
+			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume ${volumeid} is in use by another pod\"}"
 			exit 1
 		else
-			setlabelonvolume ${volumeid} "attachedToPod" "true"
+			if [ "$(setlabelonvolume ${volumeid} "attachedToPod" "true")" = "1" ]; then
+				err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attachedToPod label\"}"
+				exit 1
+			fi
 		fi
 	fi
 
@@ -624,7 +759,13 @@ case "$op" in
 	mountdevice)
 		mountdevice "$@"
 		;;
+	mount)
+		mount "$@"
+		;;
 	unmountdevice)
+		unmountdevice "$@"
+		;;
+	unmount)
 		unmountdevice "$@"
 		;;
 	isattached)
