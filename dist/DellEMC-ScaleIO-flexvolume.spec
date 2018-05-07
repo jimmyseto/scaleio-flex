@@ -1,6 +1,6 @@
 Name:           DellEMC-ScaleIO-flexvolume
 Version:        0.1.0
-Release:        4
+Release:        5
 Summary:        FlexVolume driver for ScaleIO
 URL:            http://www.emc.com/
 Source0:        https://www.github.com/
