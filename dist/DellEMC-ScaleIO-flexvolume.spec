@@ -32,7 +32,7 @@ install -d $RPM_BUILD_ROOT%{bindir}
 install -d $RPM_BUILD_ROOT%{cfgdir}
 install -d $RPM_BUILD_ROOT%{logrotatedir}
 install -m 0666 LICENSE $RPM_BUILD_ROOT%{instdir}
-install -m 0755 get-token.sh $RPM_BUILD_ROOT%{bindir}
+install -m 0755 get-token.sh.sample $RPM_BUILD_ROOT%{bindir}
 install -m 0755 cfg/config.sample $RPM_BUILD_ROOT%{cfgdir}
 install -m 0444 changes $RPM_BUILD_ROOT%{instdir}
 install -m 0644 logrotate.d/DellEMC-ScaleIO-flexvolume $RPM_BUILD_ROOT%{logrotatedir}
@@ -46,6 +46,12 @@ done
 for d in %{drivers}; do
   ln -s -f %{bindir}/${d} %{flexdir}/dell~${d}/${d}
 done
+
+# see if the get-token script exists
+# if not, copy the sample script
+if [ ! -f %{bindir}/get-token.sh ]; then
+  cp %{bindir}/get-token.sh.sample %{bindir}/get-token.sh
+fi
 
 # see if the config file exists
 # if not, just create it and we are done
@@ -100,7 +106,7 @@ done
 %{instdir}/LICENSE
 %{instdir}/changes
 %{bindir}/scaleio
-%{bindir}/get-token.sh
+%{bindir}/get-token.sh.sample
 %{cfgdir}/config.sample
 %{logrotatedir}/DellEMC-ScaleIO-flexvolume
 %dir %{flexdir}/dell~scaleio

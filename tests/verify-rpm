@@ -7,7 +7,9 @@ VERIFY_FILES=(
 "${BASE_DIR}/LICENSE"
 "${BASE_DIR}/changes"
 "${BASE_DIR}/cfg/config"
+"${BASE_DIR}/cfg/config.sample"
 "${BASE_DIR}/bin/get-token.sh"
+"${BASE_DIR}/bin/get-token.sh.sample"
 "${BASE_DIR}/bin/scaleio"
 "/etc/logrotate.d/DellEMC-ScaleIO-flexvolume"
 )
