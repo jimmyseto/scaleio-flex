@@ -103,9 +103,9 @@ getlabelfromvolume() {
 	if [ "$USELABELS" != "1" ]; then
 		return
 	fi
-	local volid="${1}"
-	local label="${2}"
-	local value=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volid} --template="{{.metadata.labels.${label}}}")
+	local volid=$1
+	local label=$2
+	local value=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pv ${volid} --template="{{.metadata.labels.${label}}}" | sed -e 's/<no value>//g')
 	debug $FUNCNAME "Retrieved label from volume ${volid} ${label}=${value}"
 	echo "${value}"
 }
@@ -151,10 +151,10 @@ clearlabelonvolume() {
 	if [ "$USELABELS" != "1" ]; then
 		return
 	fi
-	VOLID="${1}"
-	LABEL="${2}"
-	VALUE=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${VOLID} --overwrite ${LABEL}-)
-	debug $FUNCNAME "Cleared label on volume ${VOLID} ${LABEL}"
+	local volid=$1
+	local label=$2
+	local value=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} label pv ${volid} --overwrite ${label}-)
+	debug $FUNCNAME "Cleared label on volume ${volid} ${label}"
 }
 
 #########################################################
@@ -188,15 +188,33 @@ volidfromjson() {
 }
 
 #########################################################
-# getrunningorunknownpods
+# podnamefromjson
 # Arguments:
-#   Nothing
+#   $1: JSON
 # Returns
-#   List of pods (namespace/pod) with Status of Running or Unknown
+#   Pod name
 #########################################################
-getrunningorunknownpods() {
-	local pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods --all-namespaces=true | grep -E 'Running|Unknown' | awk '{printf "%s/%s\n", $1, $2}')
-	debug ${FUNCNAME} "Running or Unknown pods:" "${pods}"
+podnamefromjson() {
+	local json_params=$1
+	local podname=$(echo "${json_params}" | grep -Po '"kubernetes.io/pod.name":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
+	if [ -z "${podname}" ] || [ "${podname}" = null ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Unable to extract pod name\"}"
+		exit 1
+	fi
+	echo ${podname}
+}
+
+#########################################################
+# getpodswithspecifiedstatus
+# Arguments:
+#   $1: Pod status
+# Returns
+#   List of pods (namespace/pod) with specified status
+#########################################################
+getpodswithspecifiedstatus() {
+	local status=$1
+	local pods=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get pods --all-namespaces=true | grep ${status} | awk '{printf "%s/%s\n", $1, $2}')
+	debug ${FUNCNAME} "Pods with status of ${status}:" "${pods}"
 	echo "${pods}"
 
 }
@@ -302,17 +320,19 @@ getaccessmodesforvol() {
 }
 
 #########################################################
-# getpodboundtovol
+# getpodlinkedtovol
 # Arguments:
 #   $1: Volume ID
+#   $2: List of pods to examine (to see whether specified vol is linked to any)
 # Returns
-#   Name of running pod (namespace/pod) bound to specified volume
+#   Name of pod (namespace/pod) linked to specified volume
+#   If more than one pod in the list is linked to the specified volume, return the first found
 #########################################################
-getpodboundtovol() {
+getpodlinkedtovol() {
 	local volumeid=$1
-	local ns_running_or_unknown_pods=$(getrunningorunknownpods)
+	local pods=$2
 	local i
-	for i in ${ns_running_or_unknown_pods}
+	for i in ${pods}
 	do
 		local ns=$(echo $i | awk -F'/' '{print $1}')
 		local pod=$(echo $i | awk -F'/' '{print $2}')
@@ -380,14 +400,17 @@ getpodstatus() {
 refreshattachedtopod() {
 	local volumeid=$1
 	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
-		local volume_attached_to_pod=$(getlabelfromvolume ${volumeid} "attachedToPod")
-		if [ "${volume_attached_to_pod}" = "true" ]; then
-			local nspod=$(getpodboundtovol ${volumeid})
+		local volume_attached_pod=$(getlabelfromvolume ${volumeid} "attachedPod")
+		if [ ! -z "${volume_attached_pod}" ]; then
+			local ns_running_pods=$(getpodswithspecifiedstatus "Running")
+			local ns_unknown_pods=$(getpodswithspecifiedstatus "Unknown")
+			local ns_running_or_unknown_pods="${ns_running_pods} ${ns_unknown_pods}"
+			local nspod=$(getpodlinkedtovol ${volumeid} ${ns_running_or_unknown_pods})
 			if [ -z ${nspod} ]; then
-				# proactively clear attachedToPod label only if the following two criteria are met:
+				# proactively clear attachedPod label only if the following two criteria are met:
 				# - there are no Running pods bound to the specified volume
 				# - there are no Unknown pods potential bound to the specified volume (we don't want to assume)
-				clearlabelonvolume ${volumeid} "attachedToPod"
+				clearlabelonvolume ${volumeid} "attachedPod"
 			fi
 		fi
 	fi
@@ -471,12 +494,8 @@ attach() {
 		exit 0
 	fi
 
-	local volume_attached=$(getlabelfromvolume ${volumeid} "attached")
 	local volume_attached_node=$(getlabelfromvolume ${volumeid} "attachedNode")
-	if [ -z "${volume_attached}" ]; then
-		volume_attached="false"
-	fi
-	if [ "${volume_attached}" = "true" ]; then
+	if [ ! -z "${volume_attached_node}" ]; then
 		local nspvc=$(getpvcforvol ${volumeid})
 		local mode
 		if [ -z "${nspvc}" ]; then
@@ -497,8 +516,8 @@ attach() {
 		exit 0
 	fi
 
-	if [ "$(setlabelonvolume ${volumeid} "attached" "true")" = "1" ] || [ "$(setlabelonvolume ${volumeid} "attachedNode" "${node_name}")" = "1" ]; then
-		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attached/attachedNode labels\"}"
+	if [ "$(setlabelonvolume ${volumeid} "attachedNode" "${node_name}")" = "1" ]; then
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attachedNode label\"}"
 		exit 1
 	fi
 
@@ -509,11 +528,10 @@ attach() {
 detach() {
 	local volumeid=$1
 
-	clearlabelonvolume ${volumeid} "attached"
 	clearlabelonvolume ${volumeid} "attachedNode"
 
 	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
-		clearlabelonvolume ${volumeid} "attachedToPod"
+		clearlabelonvolume ${volumeid} "attachedPod"
 	fi
 
 	success ${FUNCNAME}
@@ -600,6 +618,27 @@ mount() {
 		exit 1
 	fi
 
+	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
+		if [ "${ENABLE_SAME_NODE_AUTO_FAILOVER_FOR_ONE_POD_RESTRICTION}" = "1" ]; then
+			# proactively clear attachedPod label if deemed safe to do so
+			refreshattachedtopod ${volumeid}
+		fi
+
+		local volume_attached_pod=$(getlabelfromvolume ${volumeid} "attachedPod")
+		local pod=$(podnamefromjson ${json_params})
+		if [ ! -z "${volume_attached_pod}" ]; then
+			if [ "${pod}" != "${volume_attached_pod}" ]; then
+				err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume ${volumeid} is in use by another pod\"}"
+				exit 1
+			fi
+		else
+			if [ "$(setlabelonvolume ${volumeid} "attachedPod" "${pod}")" = "1" ]; then
+				err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attachedPod label\"}"
+				exit 1
+			fi
+		fi
+	fi
+
 	local mode_requested=$(accessmodefromjson ${json_params})
 	if [ -z "${mode_requested}" ]; then
 		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Unable to extract access mode\"}"
@@ -658,14 +697,8 @@ isattached() {
 		exit 0
 	fi
 
-	if [ "${ENABLE_SAME_NODE_AUTO_FAILOVER_FOR_ONE_POD_RESTRICTION}" = "1" ]; then
-		# proactively clear attachedToPod label if deemed safe to do so
-		refreshattachedtopod ${volumeid}
-	fi
-
-	local volume_attached=$(getlabelfromvolume ${volumeid} "attached")
 	local volume_attached_node=$(getlabelfromvolume ${volumeid} "attachedNode")
-	if [ "${volume_attached}" = "true" ]; then
+	if [ ! -z "${volume_attached_node}" ]; then
 		if [ "${volume_attached_node}" = "${node_name}" ]; then
 			log ${FUNCNAME} "{\"status\": \"Success\", \"attached\":true}"
 			exit 0
@@ -687,19 +720,6 @@ waitforattach() {
 		debug ${FUNCNAME} "${volumeid}" "not found or mapped"
 		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume not attached\"}"
 		exit 1
-	fi
-
-	if [ "${ENABLE_ONE_POD_RESTRICTION}" = "1" ]; then
-		local volume_attached_to_pod=$(getlabelfromvolume ${volumeid} "attachedToPod")
-		if [ "${volume_attached_to_pod}" = "true" ]; then
-			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Volume ${volumeid} is in use by another pod\"}"
-			exit 1
-		else
-			if [ "$(setlabelonvolume ${volumeid} "attachedToPod" "true")" = "1" ]; then
-				err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attachedToPod label\"}"
-				exit 1
-			fi
-		fi
 	fi
 
 	log ${FUNCNAME} "{\"status\": \"Success\", \"device\":\"${dev}\"}"
