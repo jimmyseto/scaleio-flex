@@ -5,8 +5,9 @@ This driver allows users to consume ScaleIO storage, and provide persistent stor
 
 ## Requirements
 
+* ScaleIO volumes must be pre-allocated and mapped to all nodes in the cluster
 * Kubernetes/OpenShift's controller-managed attachment and detachment feature must be enabled.  This feature is enabled by default.  Ensure explicit actions were not taken to disable it.
-* For a given ScaleIO volume /dev/disk/by-id/emc-vol-``*``-``<volumeID>``, ``<volumeID>`` must be used throughout as a specifier.  More specifically... 
+* For a given ScaleIO volume /dev/disk/by-id/emc-vol-``*``-``<volumeID>``, ``<volumeID>`` must be used as the volume specifier when creating persistent volumes, pods,or deployments.   More specifically... 
   * For PersistentVolume:
     * *.metadata.name*
     * *.spec.flexVolume.options.volumeID*
@@ -21,7 +22,21 @@ This driver allows users to consume ScaleIO storage, and provide persistent stor
 
 ## Installation
 
-This driver must be deployed and installed on all nodes in the cluster.  The RPM installs the driver at /usr/libexec/kubernetes/kubelet-plugins/volume/exec/dell~scaleio/scaleio.  After installing the RPM on each node, reboot the nodes for the driver to take effect.
+This RPM must be deployed and installed on all nodes in the cluster.  After installing the RPM on each node, reboot the nodes for the FlexVolume driver to take effect.  On each node...
+
+The FlexVolume driver can be found at:
+  * /opt/emc/scaleio/flexvolume/bin/scaleio
+  * /usr/libexec/kubernetes/kubelet-plugins/volume/exec/dell~scaleio/scaleio (soft link)
+
+The FlexVolume driver configuration file can be found at:
+  * /opt/emc/scaleio/flexvolume/cfg/config
+
+The FlexVolume driver log file can be found at:
+  * /var/log/scaleio.log
+
+The FlexVolume driver token generator script can be found at:
+  * /opt/emc/scaleio/flexvolume/bin/get-token.sh
+
 
 ## Troubleshooting
 

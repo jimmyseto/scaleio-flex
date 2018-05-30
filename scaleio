@@ -466,6 +466,26 @@ ismountmodeprohibited() {
 	fi
 }
 
+#########################################################
+# isnodeready
+# Arguments:
+#   $1: Node
+# Returns
+#   1 if node is in Ready state (and Scheduling is enabled)
+#   0 otherwise
+#########################################################
+isnodeready() {
+	local node_name=$1
+
+	local status=$(${CLI_CMD} ${CONFIG_OPTION}=${KUBECONFIG} --token=${TOKEN} get node | grep ${node_name} | awk '{print $2}')
+	debug ${FUNCNAME} "${node_name} status:" "${status}"
+	if [ "${status}" = "Ready" ]; then
+		echo 1
+	else
+		echo 0
+	fi
+}
+
 getvolumename() {
 	local json_params=$1
 	local volumeid=$(echo "${json_params}" | grep -Po '"volumeID":".*"?[^\\]"' | cut -d: -f 2 | cut -d\" -f 2)
@@ -516,9 +536,16 @@ attach() {
 		exit 0
 	fi
 
-	if [ "$(setlabelonvolume ${volumeid} "attachedNode" "${node_name}")" = "1" ]; then
-		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attachedNode label\"}"
+	# Only set label if specified node is "Ready"; avoid labeling/attaching to NotReady nodes
+	if [ "$(isnodeready ${node_name})" = "1" ]; then
+		if [ "$(setlabelonvolume ${volumeid} "attachedNode" "${node_name}")" = "1" ]; then
+			err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Failed to set attachedNode label\"}"
+			exit 1
+		fi
+	else
+		err ${FUNCNAME} "{\"status\": \"Failure\", \"message\": \"Specified node is not Ready\"}"
 		exit 1
+
 	fi
 
 	log ${FUNCNAME} "{\"status\": \"Success\", \"device\":\"${volumeid}\"}"
